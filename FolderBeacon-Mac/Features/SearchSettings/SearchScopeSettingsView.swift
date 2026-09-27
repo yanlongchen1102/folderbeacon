@@ -68,10 +68,6 @@ struct SearchScopeSettingsView: View {
                 Text(row.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 12)
-            VStack(alignment: .trailing, spacing: 2) {
-                Label(row.status, systemImage: row.isReady ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
-                    .font(.caption).foregroundStyle(row.isReady ? Color.green : Color.orange)
-            }
             Menu {
                 Button(row.isPaused ? L10n.string("Resume Indexing") : L10n.string("Pause Indexing")) { row.isPaused ? state.folderIndex.resumeRoot(row.id) : state.folderIndex.pauseRoot(row.id) }
                 Button(L10n.string("Rescan Now")) { state.folderIndex.rescanRoot(row.id) }
@@ -86,21 +82,9 @@ struct SearchScopeSettingsView: View {
         .help(row.detail ?? row.lastScan.map { L10n.format("Last full scan: %@", $0.formatted(date: .abbreviated, time: .shortened)) } ?? "")
     }
 
-    private func status(_ snapshot: FolderIndexRootSnapshot) -> String {
-        switch snapshot.state {
-        case .scanning: return L10n.string("Building Index")
-        case .ready: return L10n.string("Ready")
-        case .paused: return L10n.string("Paused")
-        case .incomplete: return L10n.string("Needs Attention")
-        case .failed: return L10n.string("Failed")
-        case .updating: return L10n.string("Updating")
-        case .notStarted: return L10n.string("Waiting")
-        }
-    }
-
     private var scopeRows: [ScopeRow] {
         state.folderIndex.rootSnapshots.map { snapshot in
-            ScopeRow(id: snapshot.id, name: snapshot.root.displayName, path: snapshot.root.lastKnownPath, status: status(snapshot), isReady: snapshot.state == .ready, isPaused: snapshot.state == .paused, lastScan: snapshot.lastFullScanAt, detail: snapshot.detail)
+            ScopeRow(id: snapshot.id, name: snapshot.root.displayName, path: snapshot.root.lastKnownPath, isPaused: snapshot.state == .paused, lastScan: snapshot.lastFullScanAt, detail: snapshot.detail)
         }
     }
 
@@ -110,7 +94,7 @@ struct SearchScopeSettingsView: View {
     }
 
     nonisolated private struct ScopeRow: Identifiable {
-        let id: UUID; let name: String; let path: String; let status: String
-        let isReady: Bool; let isPaused: Bool; let lastScan: Date?; let detail: String?
+        let id: UUID; let name: String; let path: String
+        let isPaused: Bool; let lastScan: Date?; let detail: String?
     }
 }
