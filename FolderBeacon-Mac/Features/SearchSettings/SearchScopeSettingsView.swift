@@ -71,7 +71,6 @@ struct SearchScopeSettingsView: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Label(row.status, systemImage: row.isReady ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
                     .font(.caption).foregroundStyle(row.isReady ? Color.green : Color.orange)
-                Text(L10n.format("%d folders indexed", row.count)).font(.caption2).foregroundStyle(.secondary)
             }
             Menu {
                 Button(row.isPaused ? L10n.string("Resume Indexing") : L10n.string("Pause Indexing")) { row.isPaused ? state.folderIndex.resumeRoot(row.id) : state.folderIndex.pauseRoot(row.id) }
@@ -101,7 +100,7 @@ struct SearchScopeSettingsView: View {
 
     private var scopeRows: [ScopeRow] {
         state.folderIndex.rootSnapshots.map { snapshot in
-            ScopeRow(id: snapshot.id, name: snapshot.root.displayName, path: snapshot.root.lastKnownPath, status: status(snapshot), isReady: snapshot.state == .ready, isPaused: snapshot.state == .paused, count: snapshot.indexedFolderCount, lastScan: snapshot.lastFullScanAt, detail: snapshot.detail)
+            ScopeRow(id: snapshot.id, name: snapshot.root.displayName, path: snapshot.root.lastKnownPath, status: status(snapshot), isReady: snapshot.state == .ready, isPaused: snapshot.state == .paused, lastScan: snapshot.lastFullScanAt, detail: snapshot.detail)
         }
     }
 
@@ -112,6 +111,6 @@ struct SearchScopeSettingsView: View {
 
     nonisolated private struct ScopeRow: Identifiable {
         let id: UUID; let name: String; let path: String; let status: String
-        let isReady: Bool; let isPaused: Bool; let count: Int; let lastScan: Date?; let detail: String?
+        let isReady: Bool; let isPaused: Bool; let lastScan: Date?; let detail: String?
     }
 }

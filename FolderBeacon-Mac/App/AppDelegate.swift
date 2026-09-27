@@ -2,7 +2,7 @@ import AppKit
 import Sparkle
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     let state = AppState()
     private var statusItem: NSStatusItem!
     private var appWindowController: NSWindowController?
@@ -103,6 +103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func showAppWindow(page: SettingsPage) {
+        // FolderBeacon is normally an accessory menu-bar utility. Make the
+        // settings window a regular app window so users can recover it from
+        // Dock and Command-Tab if another app covers it.
+        NSApp.setActivationPolicy(.regular)
         state.openSettings(page)
         if appWindowController == nil {
             let window = NSWindow(
@@ -113,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             )
             window.title = "FolderBeacon"
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.center()
             window.contentView = NSHostingView(rootView: SettingsView(state: state, initialPage: page))
             appWindowController = NSWindowController(window: window)
@@ -120,6 +125,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         appWindowController?.showWindow(nil)
         appWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard notification.object as? NSWindow === appWindowController?.window else { return }
+        // The quick panel remains a lightweight accessory utility when no
+        // settings window is visible.
+        NSApp.setActivationPolicy(.accessory)
     }
 
     @objc private func showFolderPanel() {
