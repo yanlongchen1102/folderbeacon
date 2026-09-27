@@ -13,27 +13,14 @@ actor FolderIndexDatabase {
         try execute("PRAGMA journal_mode = WAL")
         try execute("PRAGMA synchronous = NORMAL")
         try execute("PRAGMA busy_timeout = 3000")
-        try execute("""
-            CREATE TABLE IF NOT EXISTS search_roots (
-              id TEXT PRIMARY KEY, display_name TEXT NOT NULL, last_known_path TEXT NOT NULL,
-              bookmark_data BLOB, volume_uuid TEXT, enabled INTEGER NOT NULL, include_hidden INTEGER NOT NULL,
-              last_full_scan_at REAL, created_at REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS folders (
-              id INTEGER PRIMARY KEY, root_id TEXT NOT NULL, relative_path TEXT NOT NULL,
-              parent_relative_path TEXT, name TEXT NOT NULL, normalized_name TEXT NOT NULL,
-              normalized_path TEXT NOT NULL, resource_identifier BLOB, last_seen_at REAL NOT NULL,
-              UNIQUE(root_id, relative_path), FOREIGN KEY(root_id) REFERENCES search_roots(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS folders_root_parent ON folders(root_id, parent_relative_path);
-            CREATE INDEX IF NOT EXISTS folders_name ON folders(normalized_name);
-            CREATE INDEX IF NOT EXISTS folders_path ON folders(normalized_path);
-            CREATE TABLE IF NOT EXISTS pending_reconciliations (
-              id INTEGER PRIMARY KEY, root_id TEXT NOT NULL, relative_path TEXT NOT NULL,
-              recursive INTEGER NOT NULL, reason TEXT NOT NULL, created_at REAL NOT NULL, retry_count INTEGER NOT NULL DEFAULT 0,
-              UNIQUE(root_id, relative_path)
-            );
-            """)
+        // sqlite3_prepare_v2 prepares one statement at a time. Keep migrations
+        // discrete so an existing partial database is completed on next launch.
+        try execute("CREATE TABLE IF NOT EXISTS search_roots (id TEXT PRIMARY KEY, display_name TEXT NOT NULL, last_known_path TEXT NOT NULL, bookmark_data BLOB, volume_uuid TEXT, enabled INTEGER NOT NULL, include_hidden INTEGER NOT NULL, last_full_scan_at REAL, created_at REAL NOT NULL)")
+        try execute("CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, root_id TEXT NOT NULL, relative_path TEXT NOT NULL, parent_relative_path TEXT, name TEXT NOT NULL, normalized_name TEXT NOT NULL, normalized_path TEXT NOT NULL, resource_identifier BLOB, last_seen_at REAL NOT NULL, UNIQUE(root_id, relative_path), FOREIGN KEY(root_id) REFERENCES search_roots(id) ON DELETE CASCADE)")
+        try execute("CREATE INDEX IF NOT EXISTS folders_root_parent ON folders(root_id, parent_relative_path)")
+        try execute("CREATE INDEX IF NOT EXISTS folders_name ON folders(normalized_name)")
+        try execute("CREATE INDEX IF NOT EXISTS folders_path ON folders(normalized_path)")
+        try execute("CREATE TABLE IF NOT EXISTS pending_reconciliations (id INTEGER PRIMARY KEY, root_id TEXT NOT NULL, relative_path TEXT NOT NULL, recursive INTEGER NOT NULL, reason TEXT NOT NULL, created_at REAL NOT NULL, retry_count INTEGER NOT NULL DEFAULT 0, UNIQUE(root_id, relative_path))")
     }
 
     deinit { if let db { sqlite3_close(db) } }
@@ -136,7 +123,15 @@ actor FolderIndexDatabase {
         return output
     }
 
-    private enum DatabaseError: Error { case open, sqlite(String) }
+    private enum DatabaseError: LocalizedError {
+        case open, sqlite(String)
+        var errorDescription: String? {
+            switch self {
+            case .open: return "Unable to open the local folder index database."
+            case .sqlite(let message): return "SQLite error: \(message)"
+            }
+        }
+    }
     private func execute(_ sql: String, _ values: [Any?] = []) throws { let statement = try prepare(sql); defer { sqlite3_finalize(statement) }; for (offset, value) in values.enumerated() { bind(value, to: statement, at: Int32(offset + 1)) }; try step(statement) }
     private func prepare(_ sql: String) throws -> OpaquePointer? { var statement: OpaquePointer?; guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw DatabaseError.sqlite(message) }; return statement }
     /// Some PRAGMAs (notably `journal_mode`) return a row. Consume all rows so
