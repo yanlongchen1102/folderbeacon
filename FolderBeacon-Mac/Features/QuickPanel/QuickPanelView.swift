@@ -71,6 +71,11 @@ struct QuickPanelView: View {
                     .textFieldStyle(.plain).focused($searchFocused)
                     .font(.system(size: 15, weight: .medium))
                     .onSubmit { openSelection() }
+                    // TextField normally consumes arrow keys to move its text
+                    // cursor. FolderBeacon uses them to navigate its result list.
+                    .onKeyPress(.upArrow) { moveSelection(.up); return .handled }
+                    .onKeyPress(.downArrow) { moveSelection(.down); return .handled }
+                    .onKeyPress(.escape) { state.dismissQuickPanel(); return .handled }
             }
             .padding(.horizontal, 13).padding(.vertical, 11)
             .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
