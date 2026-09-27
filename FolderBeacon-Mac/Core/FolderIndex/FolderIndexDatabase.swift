@@ -112,7 +112,7 @@ actor FolderIndexDatabase {
 
     func search(tokens: [String], limit: Int) throws -> [(UUID, String, String)] {
         guard !tokens.isEmpty else { return [] }
-        let clauses = tokens.map { _ in "(normalized_name LIKE ? ESCAPE '\\\\' OR normalized_path LIKE ? ESCAPE '\\\\')" }.joined(separator: " AND ")
+        let clauses = tokens.map { _ in "(normalized_name LIKE ? ESCAPE '\\' OR normalized_path LIKE ? ESCAPE '\\')" }.joined(separator: " AND ")
         let sql = "SELECT root_id, relative_path, name FROM folders WHERE \(clauses) LIMIT ?"
         let statement = try prepare(sql); defer { sqlite3_finalize(statement) }
         var index: Int32 = 1
@@ -146,7 +146,7 @@ actor FolderIndexDatabase {
     private func scalarInt(_ sql: String, _ values: [Any?]) throws -> Int { let statement = try prepare(sql); defer { sqlite3_finalize(statement) }; for (offset, value) in values.enumerated() { bind(value, to: statement, at: Int32(offset + 1)) }; guard sqlite3_step(statement) == SQLITE_ROW else { return 0 }; return Int(sqlite3_column_int(statement, 0)) }
     private func subtreePredicate(_ relativePath: String) -> (sql: String, values: [Any?]) {
         guard !relativePath.isEmpty else { return ("1", []) }
-        return ("(relative_path = ? OR relative_path LIKE ? ESCAPE '\\\\')", [relativePath, FolderSearchNormalizer.escapeLike(relativePath) + "/%"])
+        return ("(relative_path = ? OR relative_path LIKE ? ESCAPE '\\')", [relativePath, FolderSearchNormalizer.escapeLike(relativePath) + "/%"])
     }
     private var message: String { db.flatMap { String(cString: sqlite3_errmsg($0)) } ?? "SQLite error" }
     private func string(_ statement: OpaquePointer?, _ column: Int32) -> String? { guard let value = sqlite3_column_text(statement, column) else { return nil }; return String(cString: value) }
