@@ -91,3 +91,25 @@
 "Later" = "Later";
 
 "Features" = "Features";
+"Search Folders" = "Search Folders";
+"Search Scope" = "Search Scope";
+"Choose where FolderBeacon looks for folders. Search happens locally and does not depend on Spotlight." = "Choose where FolderBeacon looks for folders. Search happens locally and does not depend on Spotlight.";
+"Index folders in Home" = "Index folders in Home";
+"Includes your usual folders and custom workspaces. Library, Trash, and common generated folders are excluded." = "Includes your usual folders and custom workspaces. Library, Trash, and common generated folders are excluded.";
+"Indexed Locations" = "Indexed Locations";
+"No Search Folders" = "No Search Folders";
+"Add a folder to make its subfolders searchable." = "Add a folder to make its subfolders searchable.";
+"Changes are indexed in the background. You can pause a location without removing its saved index." = "Changes are indexed in the background. You can pause a location without removing its saved index.";
+"%d folders indexed" = "%d folders indexed";
+"Pause Indexing" = "Pause Indexing";
+"Resume Indexing" = "Resume Indexing";
+"Rescan Now" = "Rescan Now";
+"Remove Search Folder" = "Remove Search Folder";
+"Last full scan: %@" = "Last full scan: %@";
+"Building Index" = "Building Index";
+"Ready" = "Ready";
+"Paused" = "Paused";
+"Needs Attention" = "Needs Attention";
+"Failed" = "Failed";
+"Updating" = "Updating";
+"Waiting" = "Waiting";

@@ -91,3 +91,25 @@
 "Later" = "稍后";
 
 "Features" = "功能介绍";
+"Search Folders" = "搜索范围";
+"Search Scope" = "搜索范围";
+"Choose where FolderBeacon looks for folders. Search happens locally and does not depend on Spotlight." = "选择 FolderBeacon 搜索文件夹的位置。搜索在本机完成，不依赖 Spotlight。";
+"Index folders in Home" = "索引主目录中的文件夹";
+"Includes your usual folders and custom workspaces. Library, Trash, and common generated folders are excluded." = "包含常用文件夹和自定义工作区；会排除资源库、废纸篓及常见生成目录。";
+"Indexed Locations" = "已索引的位置";
+"No Search Folders" = "暂无搜索范围";
+"Add a folder to make its subfolders searchable." = "添加一个文件夹，即可搜索其中的子文件夹。";
+"Changes are indexed in the background. You can pause a location without removing its saved index." = "文件夹变化会在后台更新索引。暂停某个位置不会删除已保存的索引。";
+"%d folders indexed" = "已索引 %d 个文件夹";
+"Pause Indexing" = "暂停索引";
+"Resume Indexing" = "恢复索引";
+"Rescan Now" = "立即重新扫描";
+"Remove Search Folder" = "移除搜索范围";
+"Last full scan: %@" = "上次完整扫描：%@";
+"Building Index" = "正在建立索引";
+"Ready" = "已就绪";
+"Paused" = "已暂停";
+"Needs Attention" = "需要处理";
+"Failed" = "失败";
+"Updating" = "正在更新";
+"Waiting" = "等待中";
