@@ -8,7 +8,7 @@ struct QuickPanelView: View {
     @AppStorage("PathPilot.showFinderWindows") private var showFinderWindows = true
     @AppStorage("PathPilot.showRecentFolders") private var showRecentFolders = true
     @State private var query = ""
-    @State private var selectedIndex = 0
+    @State private var selectedResultID: String?
     @FocusState private var searchFocused: Bool
     @StateObject private var searchModel: QuickPanelSearchModel
 
@@ -58,6 +58,7 @@ struct QuickPanelView: View {
     }
 
     var body: some View {
+        ScrollViewReader { scrollProxy in
         VStack(spacing: 0) {
             Color.clear.frame(height: 8)
             .contentShape(Rectangle())
@@ -101,13 +102,22 @@ struct QuickPanelView: View {
                 }
             }
         }
+        .onChange(of: selectedResultID) { _, id in
+            guard let id else { return }
+            withAnimation(.easeOut(duration: 0.14)) { scrollProxy.scrollTo(id, anchor: .center) }
+        }
+        .onChange(of: resultIDs) { _, ids in
+            if let selectedResultID, ids.contains(selectedResultID) { return }
+            selectedResultID = ids.first
+        }
+        }
         .frame(width: 460, height: 270)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .preferredColorScheme(.dark)
         .onAppear {
-            selectedIndex = 0
+            selectedResultID = results.first?.id
             searchFocused = state.quickPanelShouldFocusSearch
         }
         .onChange(of: state.quickPanelSearchFocusGeneration) { _, _ in
@@ -115,7 +125,7 @@ struct QuickPanelView: View {
         }
         .onChange(of: query) { _, value in
             state.recordSearchUsage(isEmpty: value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            selectedIndex = 0
+            selectedResultID = nil
             searchModel.search(value, context: searchContext)
         }
         .onDisappear { searchModel.cancel() }
@@ -130,6 +140,8 @@ struct QuickPanelView: View {
             recent: state.recentStore.entries.map { ($0.displayName, URL(fileURLWithPath: $0.path), $0.lastUsedAt) }
         )
     }
+
+    private var resultIDs: [String] { results.map(\.id) }
 
     @ViewBuilder private var contextBrowser: some View {
         if defaultResults.isEmpty {
@@ -153,8 +165,7 @@ struct QuickPanelView: View {
 
     private func resultRows(_ rows: [FolderResult]) -> some View {
         ForEach(rows) { row in
-            let index = results.firstIndex(of: row) ?? 0
-            Button { selectedIndex = index; openSelection() } label: {
+            Button { selectedResultID = row.id; open(row) } label: {
                 HStack(spacing: 10) {
                     Image(systemName: row.kind == .favorite ? "star.fill" : "folder.fill").foregroundStyle(row.kind == .favorite ? .yellow : .accentColor).frame(width: 18)
                     VStack(alignment: .leading, spacing: 2) {
@@ -163,18 +174,24 @@ struct QuickPanelView: View {
                     }
                     Spacer()
                 }.padding(.horizontal, 14).padding(.vertical, 7).contentShape(Rectangle())
-                    .background(index == selectedIndex ? Color.accentColor.opacity(0.32) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(row.id == selectedResultID ? Color.accentColor.opacity(0.32) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .buttonStyle(.plain).padding(.horizontal, 8)
+            .buttonStyle(.plain).padding(.horizontal, 8).id(row.id)
             .contextMenu { Button(L10n.string("Open in Finder")) { state.capturePanelEvent(.openInFinder); NSWorkspace.shared.open(row.url) }; Button(L10n.string("Copy Path")) { state.capturePanelEvent(.copyPath); NSPasteboard.general.clearContents(); NSPasteboard.general.setString(row.url.path, forType: .string) } }
         }
     }
 
     private func moveSelection(_ direction: MoveCommandDirection) {
         guard !results.isEmpty else { return }
-        switch direction { case .up: selectedIndex = max(0, selectedIndex - 1); case .down: selectedIndex = min(results.count - 1, selectedIndex + 1); default: break }
+        let currentIndex = selectedResultID.flatMap { id in results.firstIndex(where: { $0.id == id }) }
+        switch direction {
+        case .up: selectedResultID = results[max(0, (currentIndex ?? 0) - 1)].id
+        case .down: selectedResultID = results[min(results.count - 1, (currentIndex ?? -1) + 1)].id
+        default: break
+        }
     }
-    private func openSelection() { guard results.indices.contains(selectedIndex) else { return }; state.navigateFromQuickPanel(to: results[selectedIndex].url) }
+    private func openSelection() { guard let selectedResultID, let row = results.first(where: { $0.id == selectedResultID }) else { return }; open(row) }
+    private func open(_ row: FolderResult) { state.navigateFromQuickPanel(to: row.url) }
 
     private func searchScore(_ result: FolderResult, query: String) -> Int {
         let name = result.name.lowercased()
