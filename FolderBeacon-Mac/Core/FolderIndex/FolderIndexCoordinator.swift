@@ -14,6 +14,7 @@ final class FolderIndexCoordinator: ObservableObject {
     @Published private(set) var rootSnapshots: [FolderIndexRootSnapshot] = []
     @Published private(set) var isStarted = false
     private let database: FolderIndexDatabase?
+    private let searchDatabase: FolderIndexSearchDatabase?
     private let scanQueue: OperationQueue = {
         let queue = OperationQueue(); queue.name = "com.folderbeacon.index-scan"; queue.maxConcurrentOperationCount = 1; queue.qualityOfService = .utility; return queue
     }()
@@ -33,8 +34,13 @@ final class FolderIndexCoordinator: ObservableObject {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let identifier = Bundle.main.bundleIdentifier ?? "com.folderbeacon.app"
         let url = appSupport.appendingPathComponent(identifier, isDirectory: true).appendingPathComponent("FolderIndex/index.sqlite", isDirectory: false)
-        do { database = try FolderIndexDatabase(databaseURL: url) }
-        catch { database = nil }
+        do {
+            database = try FolderIndexDatabase(databaseURL: url)
+            searchDatabase = try? FolderIndexSearchDatabase(databaseURL: url)
+        } catch {
+            database = nil
+            searchDatabase = nil
+        }
         eventWatcher.onEvents = { [weak self] events in
             Task { @MainActor [weak self] in self?.receive(events) }
         }
@@ -136,8 +142,15 @@ final class FolderIndexCoordinator: ObservableObject {
         let indexing = rootSnapshots.contains { $0.state == .scanning || $0.state == .updating }
         let incomplete = rootSnapshots.contains { $0.state == .incomplete || $0.availability != .available }
         guard !tokens.isEmpty else { return ([], roots, indexing, incomplete) }
+        guard !Task.isCancelled else { return ([], roots, indexing, incomplete) }
         guard let database else { return ([], roots, indexing, true) }
-        do { return (try await database.search(tokens: tokens, limit: limit + 1), roots, indexing, incomplete) }
+        do {
+            let matches: [(UUID, String, String)]
+            if let searchDatabase { matches = try await searchDatabase.search(tokens: tokens, limit: limit + 1) }
+            else { matches = try await database.search(tokens: tokens, limit: limit + 1) }
+            return (matches, roots, indexing, incomplete)
+        }
+        catch is CancellationError { return ([], roots, indexing, incomplete) }
         catch { diagnostic?("search.local.failed: \(error.localizedDescription)"); return ([], roots, indexing, true) }
     }
 

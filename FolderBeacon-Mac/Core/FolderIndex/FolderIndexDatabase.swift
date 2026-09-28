@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+nonisolated private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 actor FolderIndexDatabase {
     private var db: OpaquePointer?
@@ -110,8 +110,13 @@ actor FolderIndexDatabase {
         try execute("DELETE FROM pending_reconciliations WHERE root_id = ? AND relative_path = ?", [rootID.uuidString, relativePath])
     }
 
+    // Fallback when a separate read-only connection cannot be opened.
     func search(tokens: [String], limit: Int) throws -> [(UUID, String, String)] {
-        guard !tokens.isEmpty else { return [] }
+        guard !Task.isCancelled, !tokens.isEmpty else { return [] }
+        // SQLite can scan many rows inside one sqlite3_step. Interrupt that
+        // work promptly when a newer keystroke cancels this search task.
+        sqlite3_progress_handler(db, 1_000, { _ in Task<Never, Never>.isCancelled ? 1 : 0 }, nil)
+        defer { sqlite3_progress_handler(db, 0, nil, nil) }
         let clauses = tokens.map { _ in "(normalized_name LIKE ? ESCAPE '\\' OR normalized_path LIKE ? ESCAPE '\\')" }.joined(separator: " AND ")
         let sql = "SELECT root_id, relative_path, name FROM folders WHERE \(clauses) LIMIT ?"
         let statement = try prepare(sql); defer { sqlite3_finalize(statement) }
@@ -119,7 +124,14 @@ actor FolderIndexDatabase {
         for token in tokens { let value = "%\(FolderSearchNormalizer.escapeLike(token))%"; bind(value, to: statement, at: index); index += 1; bind(value, to: statement, at: index); index += 1 }
         sqlite3_bind_int(statement, index, Int32(limit))
         var output: [(UUID, String, String)] = []
-        while sqlite3_step(statement) == SQLITE_ROW { if let idText = string(statement, 0), let id = UUID(uuidString: idText), let relative = string(statement, 1), let name = string(statement, 2) { output.append((id, relative, name)) } }
+        while true {
+            if Task.isCancelled { throw CancellationError() }
+            let status = sqlite3_step(statement)
+            if status == SQLITE_DONE { break }
+            if status == SQLITE_INTERRUPT && Task.isCancelled { throw CancellationError() }
+            guard status == SQLITE_ROW else { throw DatabaseError.sqlite(message) }
+            if let idText = string(statement, 0), let id = UUID(uuidString: idText), let relative = string(statement, 1), let name = string(statement, 2) { output.append((id, relative, name)) }
+        }
         return output
     }
 
@@ -152,4 +164,53 @@ actor FolderIndexDatabase {
     private func string(_ statement: OpaquePointer?, _ column: Int32) -> String? { guard let value = sqlite3_column_text(statement, column) else { return nil }; return String(cString: value) }
     private func blob(_ statement: OpaquePointer?, _ column: Int32) -> Data? { guard let bytes = sqlite3_column_blob(statement, column) else { return nil }; return Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, column))) }
     private func bind(_ value: Any?, to statement: OpaquePointer?, at index: Int32) { switch value { case nil: sqlite3_bind_null(statement, index); case let value as String: sqlite3_bind_text(statement, index, value, -1, SQLITE_TRANSIENT); case let value as Data: value.withUnsafeBytes { sqlite3_bind_blob(statement, index, $0.baseAddress, Int32(value.count), SQLITE_TRANSIENT) }; case let value as Double: sqlite3_bind_double(statement, index, value); case let value as Int: sqlite3_bind_int(statement, index, Int32(value)); default: sqlite3_bind_null(statement, index) } }
+}
+
+/// A second WAL connection lets searches run while the index writer is busy
+/// committing scan batches. It never mutates the database.
+actor FolderIndexSearchDatabase {
+    private var db: OpaquePointer?
+
+    init(databaseURL: URL) throws {
+        guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw SearchError.open
+        }
+        sqlite3_busy_timeout(db, 1_000)
+    }
+
+    deinit { if let db { sqlite3_close(db) } }
+
+    func search(tokens: [String], limit: Int) throws -> [(UUID, String, String)] {
+        guard !Task.isCancelled, !tokens.isEmpty else { return [] }
+        sqlite3_progress_handler(db, 1_000, { _ in Task<Never, Never>.isCancelled ? 1 : 0 }, nil)
+        defer { sqlite3_progress_handler(db, 0, nil, nil) }
+        let clauses = tokens.map { _ in "(normalized_name LIKE ? ESCAPE '\\' OR normalized_path LIKE ? ESCAPE '\\')" }.joined(separator: " AND ")
+        let sql = "SELECT root_id, relative_path, name FROM folders WHERE \(clauses) LIMIT ?"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw SearchError.query }
+        defer { sqlite3_finalize(statement) }
+        var parameter: Int32 = 1
+        for token in tokens {
+            let pattern = "%\(FolderSearchNormalizer.escapeLike(token))%"
+            sqlite3_bind_text(statement, parameter, pattern, -1, SQLITE_TRANSIENT); parameter += 1
+            sqlite3_bind_text(statement, parameter, pattern, -1, SQLITE_TRANSIENT); parameter += 1
+        }
+        sqlite3_bind_int(statement, parameter, Int32(limit))
+        var output: [(UUID, String, String)] = []
+        while true {
+            if Task.isCancelled { throw CancellationError() }
+            let status = sqlite3_step(statement)
+            if status == SQLITE_DONE { break }
+            if status == SQLITE_INTERRUPT && Task.isCancelled { throw CancellationError() }
+            guard status == SQLITE_ROW else { throw SearchError.query }
+            guard let idBytes = sqlite3_column_text(statement, 0),
+                  let id = UUID(uuidString: String(cString: idBytes)),
+                  let relativeBytes = sqlite3_column_text(statement, 1),
+                  let nameBytes = sqlite3_column_text(statement, 2) else { continue }
+            output.append((id, String(cString: relativeBytes), String(cString: nameBytes)))
+        }
+        return output
+    }
+
+    private enum SearchError: Error { case open, query }
 }
