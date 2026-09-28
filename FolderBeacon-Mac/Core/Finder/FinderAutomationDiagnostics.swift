@@ -8,17 +8,17 @@ enum FinderAutomationDiagnostics {
         let scriptError: String?
     }
 
-    nonisolated static func requestPermissionAndCountWindows() -> Result {
+    nonisolated static func permissionStatus(prompt: Bool) -> OSStatus {
         guard let target = NSAppleEventDescriptor(bundleIdentifier: "com.apple.finder").aeDesc else {
-            return Result(permissionStatus: OSStatus(paramErr), windowCount: nil, scriptError: "Could not create Finder Apple Event target descriptor.")
+            return OSStatus(paramErr)
         }
-
-        let status = AEDeterminePermissionToAutomateTarget(
-            target,
-            AEEventClass(kCoreEventClass),
-            AEEventID(kAEGetData),
-            true
+        return AEDeterminePermissionToAutomateTarget(
+            target, AEEventClass(kCoreEventClass), AEEventID(kAEGetData), prompt
         )
+    }
+
+    nonisolated static func requestPermissionAndCountWindows() -> Result {
+        let status = permissionStatus(prompt: true)
         guard status == noErr else {
             return Result(permissionStatus: status, windowCount: nil, scriptError: nil)
         }

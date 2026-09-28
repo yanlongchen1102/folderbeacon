@@ -28,6 +28,12 @@
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>FolderBeacon needs permission to list the folders open in Finder windows.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>FolderBeacon indexes folders on your Desktop so you can find and open them quickly.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>FolderBeacon indexes folders in Documents so you can find and open them quickly.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>FolderBeacon indexes folders in Downloads so you can find and open them quickly.</string>
     <key>SUFeedURL</key>
     <string>$(FOLDERBEACON_APPCAST_URL)</string>
     <key>SUPublicEDKey</key>

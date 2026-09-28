@@ -190,7 +190,7 @@ private struct PermissionGuidanceView: View {
                 enabled: state.isFinderAccessAvailable
             ) {
                 HStack {
-                    Button(L10n.string("Check Finder Access")) { state.refreshFinderFolders() }
+                    Button(L10n.string("Check Finder Access")) { state.testFinderAutomationPermission() }
                     Button(L10n.string("Open System Settings")) {
                         AccessibilityPermissionManager.openSettings(pane: "Privacy_Automation")
                     }

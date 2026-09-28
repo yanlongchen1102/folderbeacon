@@ -25,6 +25,9 @@ struct FinderFolderQuery {
 /// permission the first time this is used.
 enum FinderFolderProvider {
     static func openWindowFolders() throws -> FinderFolderQuery {
+        guard FinderAutomationDiagnostics.permissionStatus(prompt: false) == noErr else {
+            throw FinderFolderProviderError.executionFailed("Finder Automation permission is not enabled.")
+        }
         guard NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == "com.apple.finder" }) else {
             return FinderFolderQuery(folders: [], rawResponse: "Finder is not running")
         }

@@ -75,6 +75,7 @@ final class AppState: ObservableObject {
         log("Runtime bundle URL: \(Bundle.main.bundleURL.path)")
         log("NSAppleEventsUsageDescription: \(Bundle.main.object(forInfoDictionaryKey: "NSAppleEventsUsageDescription") as? String ?? "missing")")
         refreshAccessibilityState()
+        refreshFinderPermission()
         _ = hotkey.start(shortcut: globalShortcut)
         configureFilePanelDetector()
         filePanelDetector.start()
@@ -216,6 +217,16 @@ final class AppState: ObservableObject {
         let generation = UUID()
         finderLookupGeneration = generation
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let permission = FinderAutomationDiagnostics.permissionStatus(prompt: false)
+            guard permission == noErr else {
+                DispatchQueue.main.async {
+                    guard let self, self.finderLookupGeneration == generation else { return }
+                    self.finderFolders = []
+                    self.isFinderAccessAvailable = false
+                    self.finderLookupStatus = "Finder Automation permission is not enabled."
+                }
+                return
+            }
             let result = Result { try FinderFolderProvider.openWindowFolders() }
             DispatchQueue.main.async {
                 guard let self, self.finderLookupGeneration == generation else { return }
@@ -231,6 +242,17 @@ final class AppState: ObservableObject {
                     self.finderLookupStatus = "Could not access Finder: \(error.localizedDescription)"
                     self.log("Finder folder lookup unavailable: \(error.localizedDescription)")
                 }
+            }
+        }
+    }
+
+    func refreshFinderPermission() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let granted = FinderAutomationDiagnostics.permissionStatus(prompt: false) == noErr
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isFinderAccessAvailable = granted
+                if !granted { self.finderFolders = [] }
             }
         }
     }

@@ -46,7 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     func applicationDidBecomeActive(_ notification: Notification) {
         // System Settings changes Accessibility permission while the app is inactive.
         // Defer the published update until AppKit completes its activation layout pass.
-        DispatchQueue.main.async { [weak self] in self?.state.refreshAccessibilityState() }
+        DispatchQueue.main.async { [weak self] in
+            self?.state.refreshAccessibilityState()
+            self?.state.refreshFinderPermission()
+            self?.state.folderIndex.refreshProtectedFolderAccess()
+        }
     }
 
     private func configureMenuBar() {

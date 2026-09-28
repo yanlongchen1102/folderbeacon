@@ -38,9 +38,11 @@ struct QuickPanelView: View {
     }
 
     private var defaultResults: [FolderResult] {
-        // Open Finder windows are the strongest context signal, followed by
-        // explicit favorites and then recently used folders.
-        searchableResults.filter { $0.kind == .current || $0.kind == .finder || $0.kind == .favorite || $0.kind == .recent }
+        // Keep keyboard navigation in the same order as contextBrowser's sections.
+        let items = searchableResults
+        return items.filter { $0.kind == .current || $0.kind == .finder }
+            + items.filter { $0.kind == .recent }
+            + items.filter { $0.kind == .favorite }
     }
 
     private var results: [FolderResult] {
@@ -104,7 +106,7 @@ struct QuickPanelView: View {
         }
         .onChange(of: selectedResultID) { _, id in
             guard let id else { return }
-            withAnimation(.easeOut(duration: 0.14)) { scrollProxy.scrollTo(id, anchor: .center) }
+            scrollProxy.scrollTo(id, anchor: .center)
         }
         .onChange(of: resultIDs) { _, ids in
             if let selectedResultID, ids.contains(selectedResultID) { return }
@@ -182,11 +184,12 @@ struct QuickPanelView: View {
     }
 
     private func moveSelection(_ direction: MoveCommandDirection) {
-        guard !results.isEmpty else { return }
-        let currentIndex = selectedResultID.flatMap { id in results.firstIndex(where: { $0.id == id }) }
+        let visibleResults = results
+        guard !visibleResults.isEmpty else { return }
+        let currentIndex = selectedResultID.flatMap { id in visibleResults.firstIndex(where: { $0.id == id }) }
         switch direction {
-        case .up: selectedResultID = results[max(0, (currentIndex ?? 0) - 1)].id
-        case .down: selectedResultID = results[min(results.count - 1, (currentIndex ?? -1) + 1)].id
+        case .up: selectedResultID = visibleResults[max(0, (currentIndex ?? 0) - 1)].id
+        case .down: selectedResultID = visibleResults[min(visibleResults.count - 1, (currentIndex ?? -1) + 1)].id
         default: break
         }
     }

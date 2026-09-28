@@ -2,6 +2,13 @@ import AppKit
 import Combine
 import Foundation
 
+nonisolated private final class ScanCancellationToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+}
+
 @MainActor
 final class FolderIndexCoordinator: ObservableObject {
     @Published private(set) var rootSnapshots: [FolderIndexRootSnapshot] = []
@@ -11,11 +18,15 @@ final class FolderIndexCoordinator: ObservableObject {
         let queue = OperationQueue(); queue.name = "com.folderbeacon.index-scan"; queue.maxConcurrentOperationCount = 1; queue.qualityOfService = .utility; return queue
     }()
     private var generations: [UUID: UUID] = [:]
+    private var scanTokens: [UUID: ScanCancellationToken] = [:]
     private let eventWatcher = FolderIndexEventWatcher()
     private var reconciliationDebounce: Task<Void, Never>?
     private var reconciliationInFlight = false
     private var availabilityRefreshTask: Task<Void, Never>?
+    private var inaccessibleProtectedHomeFolders: Set<String> = []
+    private var homePreflightTask: Task<[String], Never>?
     private let didCreateHomeScopeKey = "FolderBeacon.didCreateDefaultHomeScope.v1"
+    private let didRestoreHomeScopeKey = "FolderBeacon.didRestoreProtectedHomeFolders.v1"
     var diagnostic: ((String) -> Void)?
 
     init() {
@@ -39,19 +50,23 @@ final class FolderIndexCoordinator: ObservableObject {
             guard let self else { return }
             do {
                 let stored = try await database.roots()
+                let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
                 rootSnapshots = stored.map { root, date in FolderIndexRootSnapshot(root: root, availability: self.availability(of: root), state: root.isEnabled ? .notStarted : .paused, indexedFolderCount: 0, lastFullScanAt: date, detail: nil) }
                 var defaultRootID: UUID?
                 if rootSnapshots.isEmpty && !UserDefaults.standard.bool(forKey: didCreateHomeScopeKey) {
-                    let home = FileManager.default.homeDirectoryForCurrentUser
                     let root = try await addRoot(home)
                     UserDefaults.standard.set(true, forKey: didCreateHomeScopeKey)
                     defaultRootID = root.id
                     diagnostic?("index.root.added default Home scope")
                 }
+                if rootSnapshots.contains(where: { $0.root.isEnabled && $0.root.url.standardizedFileURL == home }), defaultRootID == nil {
+                    await preflightHomeFolders()
+                }
                 for snapshot in rootSnapshots where snapshot.root.isEnabled {
                     if snapshot.id == defaultRootID { continue }
                     eventWatcher.start(root: snapshot.root)
-                    snapshotCountAndStart(snapshot.root.id, force: false)
+                    let restoreHome = snapshot.root.url.standardizedFileURL == home && !UserDefaults.standard.bool(forKey: didRestoreHomeScopeKey)
+                    snapshotCountAndStart(snapshot.root.id, force: restoreHome)
                 }
                 processNextPendingReconciliation()
                 startAvailabilityRefresh()
@@ -59,7 +74,7 @@ final class FolderIndexCoordinator: ObservableObject {
         }
     }
 
-    func stop() { generations.removeAll(); reconciliationDebounce?.cancel(); availabilityRefreshTask?.cancel(); eventWatcher.stopAll(); scanQueue.cancelAllOperations() }
+    func stop() { scanTokens.values.forEach { $0.cancel() }; scanTokens.removeAll(); generations.removeAll(); reconciliationDebounce?.cancel(); availabilityRefreshTask?.cancel(); eventWatcher.stopAll(); scanQueue.cancelAllOperations() }
 
     func addRoot(_ url: URL) async throws -> SearchRoot {
         let normalized = url.standardizedFileURL
@@ -67,6 +82,9 @@ final class FolderIndexCoordinator: ObservableObject {
         if let existing = rootSnapshots.first(where: { path($0.root.url, contains: normalized) }) { throw FolderIndexError.contained(existing.root.displayName) }
         let children = rootSnapshots.filter { path(normalized, contains: $0.root.url) }
         if !children.isEmpty { throw FolderIndexError.containsExisting(children.map { $0.root.displayName }) }
+        if normalized == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL {
+            await preflightHomeFolders()
+        }
         let bookmark = try? normalized.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
         let resourceValues = try? normalized.resourceValues(forKeys: [.volumeUUIDStringKey])
         let volume = resourceValues?.volumeUUIDString
@@ -79,10 +97,20 @@ final class FolderIndexCoordinator: ObservableObject {
         return root
     }
 
-    func removeRoot(_ id: UUID) async throws { guard let database else { throw FolderIndexError.databaseUnavailable }; generations[id] = UUID(); eventWatcher.stop(rootID: id); try await database.removeRoot(id); rootSnapshots.removeAll { $0.id == id }; diagnostic?("index.root.removed \(id)") }
-    func pauseRoot(_ id: UUID) { update(id) { $0.root.isEnabled = false; $0.state = .paused }; generations[id] = UUID(); eventWatcher.stop(rootID: id); persist(id) }
+    func removeRoot(_ id: UUID) async throws { guard let database else { throw FolderIndexError.databaseUnavailable }; scanTokens.removeValue(forKey: id)?.cancel(); generations[id] = UUID(); eventWatcher.stop(rootID: id); try await database.removeRoot(id); rootSnapshots.removeAll { $0.id == id }; diagnostic?("index.root.removed \(id)") }
+    func pauseRoot(_ id: UUID) { update(id) { $0.root.isEnabled = false; $0.state = .paused }; scanTokens.removeValue(forKey: id)?.cancel(); generations[id] = UUID(); eventWatcher.stop(rootID: id); persist(id) }
     func resumeRoot(_ id: UUID) { update(id) { $0.root.isEnabled = true; $0.state = .notStarted }; persist(id); if let root = rootSnapshots.first(where: { $0.id == id })?.root { eventWatcher.start(root: root) }; startScan(id, force: false) }
     func rescanRoot(_ id: UUID) { startScan(id, force: true) }
+
+    func refreshProtectedFolderAccess() {
+        guard !inaccessibleProtectedHomeFolders.isEmpty,
+              let homeRoot = rootSnapshots.first(where: { $0.root.isEnabled && $0.root.url.standardizedFileURL == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL }) else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await preflightHomeFolders()
+            if inaccessibleProtectedHomeFolders.isEmpty { rescanRoot(homeRoot.id) }
+        }
+    }
 
     /// Home is the product default. Removing it is an intentional user choice;
     /// the one-time onboarding marker prevents it from being silently re-added.
@@ -128,6 +156,8 @@ final class FolderIndexCoordinator: ObservableObject {
         let available = availability(of: snapshot.root)
         guard available == .available else { update(id) { $0.availability = available; $0.state = .incomplete; $0.detail = "Search directory is currently unavailable." }; return }
         let generation = UUID(); generations[id] = generation
+        scanTokens.removeValue(forKey: id)?.cancel()
+        let token = ScanCancellationToken(); scanTokens[id] = token
         update(id) { $0.availability = .available; $0.state = .scanning; $0.detail = nil }
         guard let database else { return }
         let root = snapshot.root; let scanner = FolderIndexScanner(); let queue = scanQueue
@@ -137,9 +167,7 @@ final class FolderIndexCoordinator: ObservableObject {
             // OperationQueue considers an operation finished when its closure returns.
             // Keep that boundary aligned with the async database/scanner work so scans remain serialized.
             let completion = DispatchSemaphore(value: 0)
-            let cancelled: @Sendable () -> Bool = { [weak self, weak queue] in
-                queue?.operations.contains(where: { $0.isCancelled }) == true || Task.isCancelled || self?.generations[id] != generation
-            }
+            let cancelled: @Sendable () -> Bool = { token.isCancelled }
             Task {
                 defer { completion.signal() }
                 do {
@@ -152,7 +180,15 @@ final class FolderIndexCoordinator: ObservableObject {
                     guard !cancelled() else { throw CancellationError() }
                     try await database.finishScan(rootID: id, stamp: stamp)
                     let count = try await database.folderCount(rootID: id)
-                    await MainActor.run { [weak self] in guard self?.generations[id] == generation else { return }; self?.update(id) { $0.state = .ready; $0.indexedFolderCount = count; $0.lastFullScanAt = Date(timeIntervalSince1970: stamp) }; self?.diagnostic?("index.scan.finished \(id), \(count) folders") }
+                    await MainActor.run { [weak self] in
+                        guard let self, self.generations[id] == generation else { return }
+                        self.update(id) { $0.state = .ready; $0.indexedFolderCount = count; $0.lastFullScanAt = Date(timeIntervalSince1970: stamp) }
+                        if root.url.standardizedFileURL == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL,
+                           self.inaccessibleProtectedHomeFolders.isEmpty {
+                            UserDefaults.standard.set(true, forKey: self.didRestoreHomeScopeKey)
+                        }
+                        self.diagnostic?("index.scan.finished \(id), \(count) folders")
+                    }
                 } catch is CancellationError { await MainActor.run { [weak self] in self?.diagnostic?("index.scan.cancelled \(id)") } }
                 catch { await MainActor.run { [weak self] in guard self?.generations[id] == generation else { return }; self?.update(id) { $0.state = .incomplete; $0.detail = error.localizedDescription }; self?.diagnostic?("index.scan.incomplete \(id): \(error.localizedDescription)") } }
             }
@@ -204,10 +240,12 @@ final class FolderIndexCoordinator: ObservableObject {
             return
         }
         let root = snapshot.root; let scanner = FolderIndexScanner(); let queue = scanQueue; let generation = UUID(); generations[rootID] = generation
+        scanTokens.removeValue(forKey: rootID)?.cancel()
+        let token = ScanCancellationToken(); scanTokens[rootID] = token
         update(rootID) { $0.state = .updating; $0.detail = nil }
         queue.addOperation { [weak self] in
             let stamp = Date.now.timeIntervalSince1970; let completion = DispatchSemaphore(value: 0)
-            let cancelled: @Sendable () -> Bool = { self?.generations[rootID] != generation }
+            let cancelled: @Sendable () -> Bool = { token.isCancelled }
             Task {
                 defer { completion.signal() }
                 do {
@@ -241,15 +279,44 @@ final class FolderIndexCoordinator: ObservableObject {
     }
 
     private func persist(_ id: UUID) { guard let database, let root = rootSnapshots.first(where: { $0.id == id })?.root else { return }; Task { try? await database.saveRoot(root) } }
+
+    private func preflightHomeFolders() async {
+        if let homePreflightTask {
+            inaccessibleProtectedHomeFolders = Set(await homePreflightTask.value)
+            return
+        }
+        diagnostic?("index.permissions.preflight.started")
+        let task = Task.detached(priority: .userInitiated) {
+            Self.probeProtectedHomeFolders()
+        }
+        homePreflightTask = task
+        let inaccessible = await task.value
+        homePreflightTask = nil
+        inaccessibleProtectedHomeFolders = Set(inaccessible)
+        diagnostic?("index.permissions.preflight.finished; inaccessible: \(inaccessible.joined(separator: ", "))")
+    }
+
+    nonisolated private static func probeProtectedHomeFolders() -> [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let manager = FileManager.default
+        var inaccessible: [String] = []
+        for name in ["Desktop", "Documents", "Downloads", "Movies", "Music", "Pictures"] {
+            let folder = home.appendingPathComponent(name, isDirectory: true)
+            // Enumerating one level triggers macOS's first-use consent before
+            // the much slower recursive index reaches this folder.
+            do { _ = try manager.contentsOfDirectory(atPath: folder.path) }
+            catch {
+                let error = error as NSError
+                if error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError { continue }
+                inaccessible.append(name)
+            }
+        }
+        return inaccessible
+    }
+
     private func update(_ id: UUID, _ body: (inout FolderIndexRootSnapshot) -> Void) { guard let index = rootSnapshots.firstIndex(where: { $0.id == id }) else { return }; body(&rootSnapshots[index]) }
     private func availability(of url: URL) -> SearchRootAvailability { var directory: ObjCBool = false; if FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) { return directory.boolValue ? .available : .missing }; return .missing }
-    private func availability(of root: SearchRoot) -> SearchRootAvailability {
-        let direct = availability(of: root.url)
-        guard direct != .available, let expectedVolume = root.volumeUUID else { return direct }
-        let mounted = (try? FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeUUIDStringKey], options: [.skipHiddenVolumes])) ?? []
-        let isMounted = mounted.contains { (try? $0.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString) == expectedVolume }
-        return isMounted ? .missing : .offline
-    }
+    private func availability(of root: SearchRoot) -> SearchRootAvailability { Self.checkAvailability(of: root) }
     private func relativePath(_ url: URL, under root: URL) -> String { let rootPath = root.standardizedFileURL.path; let path = url.standardizedFileURL.path; guard path == rootPath || path.hasPrefix(rootPath + "/") else { return "" }; return String(path.dropFirst(rootPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/")) }
     private func startAvailabilityRefresh() {
         availabilityRefreshTask?.cancel()
@@ -257,8 +324,13 @@ final class FolderIndexCoordinator: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
                 guard !Task.isCancelled, let self else { return }
-                for snapshot in self.rootSnapshots where snapshot.root.isEnabled {
-                    let current = self.availability(of: snapshot.root)
+                let roots = self.rootSnapshots.filter { $0.root.isEnabled }.map(\.root)
+                let availability = await Task.detached(priority: .utility) {
+                    roots.map { ($0.id, Self.checkAvailability(of: $0)) }
+                }.value
+                guard !Task.isCancelled else { return }
+                for (id, current) in availability {
+                    guard let snapshot = self.rootSnapshots.first(where: { $0.id == id && $0.root.isEnabled }) else { continue }
                     if current == .available && snapshot.availability != .available {
                         self.update(snapshot.id) { $0.availability = .available; $0.state = .updating; $0.detail = nil }
                         self.eventWatcher.start(root: snapshot.root)
@@ -270,6 +342,15 @@ final class FolderIndexCoordinator: ObservableObject {
                 }
             }
         }
+    }
+    nonisolated private static func checkAvailability(of root: SearchRoot) -> SearchRootAvailability {
+        var directory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: root.url.path, isDirectory: &directory) {
+            return directory.boolValue ? .available : .missing
+        }
+        guard let expectedVolume = root.volumeUUID else { return .missing }
+        let mounted = (try? FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeUUIDStringKey], options: [.skipHiddenVolumes])) ?? []
+        return mounted.contains { (try? $0.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString) == expectedVolume } ? .missing : .offline
     }
     private func path(_ parent: URL, contains child: URL) -> Bool { let parentParts = parent.standardizedFileURL.pathComponents; let childParts = child.standardizedFileURL.pathComponents; return parentParts.count <= childParts.count && zip(parentParts, childParts).allSatisfy(==) }
 }

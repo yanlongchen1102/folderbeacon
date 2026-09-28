@@ -26,9 +26,12 @@ final class FolderIndexScanner: @unchecked Sendable {
             }
             for child in children {
                 if isCancelled() { throw CancellationError() }
-                let values = try child.resourceValues(forKeys: keys)
-                guard policy.shouldIndex(child, values: values, root: root) else { continue }
                 let relative = child.path.dropFirst(rootURL.path.count).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                guard let values = try? child.resourceValues(forKeys: keys) else {
+                    await unreadable(relative)
+                    continue
+                }
+                guard policy.shouldIndex(child, values: values, root: root) else { continue }
                 let parent = (relative as NSString).deletingLastPathComponent
                 let identifier = values.fileResourceIdentifier.flatMap { try? NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: false) }
                 batch.append(IndexedFolder(relativePath: relative, parentRelativePath: parent.isEmpty ? "" : parent, name: child.lastPathComponent, normalizedName: FolderSearchNormalizer.normalize(child.lastPathComponent), normalizedPath: FolderSearchNormalizer.normalize(relative), resourceIdentifier: identifier))
