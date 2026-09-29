@@ -26,7 +26,6 @@ final class FolderIndexCoordinator: ObservableObject {
     private var availabilityRefreshTask: Task<Void, Never>?
     private var inaccessibleProtectedHomeFolders: Set<String> = []
     private var homePreflightTask: Task<[String], Never>?
-    private let didCreateHomeScopeKey = "FolderBeacon.didCreateDefaultHomeScope.v1"
     private let didRestoreHomeScopeKey = "FolderBeacon.didRestoreProtectedHomeFolders.v1"
     var diagnostic: ((String) -> Void)?
 
@@ -58,18 +57,12 @@ final class FolderIndexCoordinator: ObservableObject {
                 let stored = try await database.roots()
                 let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
                 rootSnapshots = stored.map { root, date in FolderIndexRootSnapshot(root: root, availability: self.availability(of: root), state: root.isEnabled ? .notStarted : .paused, indexedFolderCount: 0, lastFullScanAt: date, detail: nil) }
-                var defaultRootID: UUID?
-                if rootSnapshots.isEmpty && !UserDefaults.standard.bool(forKey: didCreateHomeScopeKey) {
-                    let root = try await addRoot(home)
-                    UserDefaults.standard.set(true, forKey: didCreateHomeScopeKey)
-                    defaultRootID = root.id
-                    diagnostic?("index.root.added default Home scope")
-                }
-                if rootSnapshots.contains(where: { $0.root.isEnabled && $0.root.url.standardizedFileURL == home }), defaultRootID == nil {
+                // Search across Home is opt in. Starting it here would trigger
+                // Desktop/Documents/Downloads consent before the user asks to search them.
+                if rootSnapshots.contains(where: { $0.root.isEnabled && $0.root.url.standardizedFileURL == home }) {
                     await preflightHomeFolders()
                 }
                 for snapshot in rootSnapshots where snapshot.root.isEnabled {
-                    if snapshot.id == defaultRootID { continue }
                     eventWatcher.start(root: snapshot.root)
                     let restoreHome = snapshot.root.url.standardizedFileURL == home && !UserDefaults.standard.bool(forKey: didRestoreHomeScopeKey)
                     snapshotCountAndStart(snapshot.root.id, force: restoreHome)
@@ -118,8 +111,7 @@ final class FolderIndexCoordinator: ObservableObject {
         }
     }
 
-    /// Home is the product default. Removing it is an intentional user choice;
-    /// the one-time onboarding marker prevents it from being silently re-added.
+    /// Home indexing starts only after the user enables it in Search Scope.
     func setHomeScopeEnabled(_ enabled: Bool) {
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
         if enabled {
@@ -129,7 +121,6 @@ final class FolderIndexCoordinator: ObservableObject {
                 guard let self else { return }
                 for child in children { try? await self.removeRoot(child.id) }
                 _ = try? await self.addRoot(home)
-                UserDefaults.standard.set(true, forKey: self.didCreateHomeScopeKey)
             }
         } else if let existing = rootSnapshots.first(where: { $0.root.url.standardizedFileURL == home }) {
             Task { try? await removeRoot(existing.id) }

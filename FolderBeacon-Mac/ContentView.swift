@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum SettingsPage: Hashable {
@@ -66,15 +67,15 @@ private struct GettingStartedView: View {
                 Image(systemName: "rectangle.and.text.magnifyingglass").font(.title).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(L10n.string("How it works")).font(.headline)
-                    Text(L10n.string("No extra steps needed.")).fontWeight(.medium)
-                    Text(L10n.string("When an Open or Save dialog appears, FolderBeacon shows up automatically. Choose a folder, and the current dialog jumps there instantly.")).foregroundStyle(.secondary)
+                    Text(L10n.string("Enable file dialog access once.")).fontWeight(.medium)
+                    Text(L10n.string("After you grant access, FolderBeacon appears in compatible Open and Save dialogs. Choose a folder to jump there.")).foregroundStyle(.secondary)
                 }
             }.padding(18).frame(maxWidth: .infinity, alignment: .leading).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 0) {
                 FeatureRow(icon: "sparkles", title: "Auto Show", detail: "Automatically appears when an Open or Save dialog is detected.")
                 Divider()
-                FeatureRow(icon: "magnifyingglass", title: "Find folders faster", detail: "Search favorites, recent locations, and folders currently open in Finder.")
+                FeatureRow(icon: "magnifyingglass", title: "Find folders faster", detail: "Search favorites and recent locations. Finder windows and local folder search can be enabled separately.")
                 Divider()
                 FeatureRow(icon: "arrow.right", title: "Jump instantly", detail: "Select a folder and the current Open or Save dialog navigates there immediately.")
                 }
@@ -116,7 +117,7 @@ private struct GeneralView: View {
     @AppStorage("PathPilot.showRecentFolders") private var showRecentFolders = true
     var state: AppState
     @ObservedObject private var language = AppLanguage.shared
-    var body: some View { Form { Section(L10n.string("Language")) { Picker(L10n.string("App Language"), selection: $language.choice) { ForEach(AppLanguage.Choice.allCases) { choice in Text(choice.title).tag(choice) } }; Text(L10n.string("Choose the language used by FolderBeacon.")).font(.caption).foregroundStyle(.secondary) }; Section(L10n.string("Behavior")) { Toggle(L10n.string("Show Finder Windows"), isOn: $showFinderWindows); Toggle(L10n.string("Show Recent Folders"), isOn: $showRecentFolders) }; Section(L10n.string("Support")) { LabeledContent(L10n.string("Accessibility"), value: L10n.string(state.isAccessibilityTrusted ? "Enabled" : "Needs Setup")); Button(L10n.string("Open Permissions")) { state.openSettings(.permissions) } } }.formStyle(.grouped) }
+    var body: some View { Form { Section(L10n.string("Language")) { Picker(L10n.string("App Language"), selection: $language.choice) { ForEach(AppLanguage.Choice.allCases) { choice in Text(choice.title).tag(choice) } }; Text(L10n.string("Choose the language used by FolderBeacon.")).font(.caption).foregroundStyle(.secondary) }; Section(L10n.string("Behavior")) { Toggle(L10n.string("Show Finder Windows"), isOn: $showFinderWindows); Toggle(L10n.string("Show Recent Folders"), isOn: $showRecentFolders) }; Section(L10n.string("Support")) { LabeledContent(L10n.string("File Dialog Access"), value: L10n.string(state.isAccessibilityTrusted ? "Enabled" : "Needs Setup")); Button(L10n.string("Open Permissions")) { state.openSettings(.permissions) } } }.formStyle(.grouped) }
 }
 
 private struct ShortcutView: View {
@@ -169,51 +170,106 @@ private struct PermissionGuidanceView: View {
     @ObservedObject var state: AppState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             Text(L10n.string("Permissions")).font(.title2.bold())
             permissionCard(
                 title: "Navigate File Dialogs",
-                detail: "Allows FolderBeacon to jump between folders inside standard or Accessibility-compatible macOS Open and Save dialogs.",
-                enabled: state.isAccessibilityTrusted
+                detail: "Allow FolderBeacon to detect Open and Save dialogs and jump to a selected folder. macOS calls this Device Control and Data Access on newer versions.",
+                status: state.isAccessibilityTrusted ? "Enabled" : "Needs Setup",
+                statusColor: state.isAccessibilityTrusted ? .green : .orange,
+                required: true
             ) {
                 Button(L10n.string("Open System Settings")) {
-                    if state.isAccessibilityTrusted {
-                        AccessibilityPermissionManager.openSettings()
-                    } else {
-                        state.requestAccessibilityPermission()
-                    }
+                    state.openAccessibilitySettings()
                 }
             }
             permissionCard(
                 title: "Finder Access",
-                detail: "Allows FolderBeacon to show directories from open Finder windows.",
-                enabled: state.isFinderAccessAvailable
+                detail: "Show folders from open Finder windows. File dialog navigation works without this permission.",
+                status: !state.isFinderPermissionChecked ? "Checking" : (state.isFinderAccessAvailable ? "Enabled" : "Not Enabled"),
+                statusColor: state.isFinderAccessAvailable ? .green : .secondary,
+                required: false
             ) {
                 HStack {
-                    Button(L10n.string("Check Finder Access")) { state.testFinderAutomationPermission() }
+                    Button(L10n.string("Allow Finder Access")) { state.testFinderAutomationPermission() }
+                        .disabled(state.isFinderAccessAvailable)
                     Button(L10n.string("Open System Settings")) {
                         AccessibilityPermissionManager.openSettings(pane: "Privacy_Automation")
                     }
                 }
+                if !state.finderPermissionMessage.isEmpty {
+                    Text(L10n.string(state.finderPermissionMessage))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            permissionCard(
+                title: "Search Your Folders",
+                detail: "Choose search folders when you want local folder search. macOS may ask for access to protected folders you include.",
+                status: "Optional",
+                statusColor: .secondary,
+                required: false
+            ) {
+                Button(L10n.string("Choose Search Folders")) { state.openSettings(.searchScopes) }
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(L10n.string("Running App Copy")).font(.subheadline.weight(.semibold))
+                if Bundle.main.bundleURL.path.contains("/DerivedData/") {
+                    Text(L10n.string("This is an Xcode build. Launch the app in Applications to check the permission your users will see."))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else if Bundle.main.bundleURL.path.hasPrefix("/Volumes/") {
+                    Text(L10n.string("Move FolderBeacon to Applications before granting access."))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text(L10n.string("Grant access to this exact copy of FolderBeacon. If it is missing from the system list, drag its icon into the list or use the + button."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Image(nsImage: NSWorkspace.shared.icon(forFile: Bundle.main.bundleURL.path))
+                    .resizable()
+                    .frame(width: 48, height: 48)
+                    .onDrag { NSItemProvider(object: Bundle.main.bundleURL as NSURL) }
+                    .help(L10n.string("Drag this app into System Settings"))
+                Text(Bundle.main.bundleURL.path)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(L10n.string("Show Running App in Finder")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+                }
+            }
+            .padding(.top, 4)
+        }
+        .task {
+            while !Task.isCancelled {
+                state.refreshAccessibilityState()
+                state.refreshFinderPermission()
+                try? await Task.sleep(for: .seconds(2))
             }
         }
     }
 
-    private func permissionCard<Actions: View>(title: String, detail: String, enabled: Bool, @ViewBuilder actions: () -> Actions) -> some View {
+    private func permissionCard<Actions: View>(title: String, detail: String, status: String, statusColor: Color, required: Bool, @ViewBuilder actions: () -> Actions) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(L10n.string(title)).font(.headline)
+                Text(L10n.string(required ? "Required" : "Optional"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Label(L10n.string(enabled ? "Enabled" : "Needs Setup"), systemImage: enabled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(enabled ? Color.green : Color.red)
+                Label(L10n.string(status), systemImage: status == "Enabled" ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(statusColor)
             }
             Text(L10n.string(detail)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             actions()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(enabled ? Color.secondary.opacity(0.08) : Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(enabled ? Color.clear : Color.red.opacity(0.45)))
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(required && status == "Needs Setup" ? Color.orange.opacity(0.45) : Color.clear))
     }
 }
 

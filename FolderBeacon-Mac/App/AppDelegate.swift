@@ -88,7 +88,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc private func enableAutomaticPopup() {
         showAppWindow(page: .permissions)
-        state.requestAccessibilityPermission()
     }
 
     @objc private func checkForUpdates(_ sender: Any?) {

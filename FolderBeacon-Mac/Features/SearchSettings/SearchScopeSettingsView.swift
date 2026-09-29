@@ -9,7 +9,7 @@ struct SearchScopeSettingsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(L10n.string("Search Scope")).font(.title2.weight(.semibold))
-                    Text(L10n.string("Choose where FolderBeacon looks for folders. Search happens locally and does not depend on Spotlight."))
+                    Text(L10n.string("Choose where FolderBeacon looks for folders. Search happens locally and does not depend on Spotlight. Protected folders may trigger a macOS access request when indexing begins."))
                         .font(.callout).foregroundStyle(.secondary)
                 }
 

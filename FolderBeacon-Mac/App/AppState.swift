@@ -11,9 +11,11 @@ final class AppState: ObservableObject {
     @Published private(set) var finderFolders: [FinderWindowFolder] = []
     @Published private(set) var finderLookupStatus = "Not checked yet"
     @Published private(set) var automationTestStatus = "Not checked yet"
+    @Published private(set) var finderPermissionMessage = ""
     @Published private(set) var isFileDialogActive = false
     @Published private(set) var fileDialogTitle = ""
     @Published private(set) var isFinderAccessAvailable = false
+    @Published private(set) var isFinderPermissionChecked = false
     @Published var requestedSettingsPage: SettingsPage?
     @Published private(set) var globalShortcut = GlobalShortcut.load()
     @Published private(set) var globalShortcutStatus = ""
@@ -91,12 +93,8 @@ final class AppState: ObservableObject {
         folderIndex.stop()
     }
 
-    func requestAccessibilityPermission() {
-        AccessibilityPermissionManager.requestPermission()
-        // The Privacy pane is asynchronous; refresh again after the user returns.
-        for delay in [0.5, 1.5, 3.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { self.refreshAccessibilityState() }
-        }
+    func openAccessibilitySettings() {
+        AccessibilityPermissionManager.openSettings()
     }
 
     func refreshAccessibilityState() {
@@ -257,6 +255,7 @@ final class AppState: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isFinderAccessAvailable = granted
+                self.isFinderPermissionChecked = true
                 if !granted { self.finderFolders = [] }
             }
         }
@@ -264,6 +263,7 @@ final class AppState: ObservableObject {
 
     func testFinderAutomationPermission() {
         automationTestStatus = "Requesting Finder Automation permission…"
+        finderPermissionMessage = "Waiting for macOS to check Finder access…"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = FinderAutomationDiagnostics.requestPermissionAndCountWindows()
             DispatchQueue.main.async {
@@ -272,6 +272,11 @@ final class AppState: ObservableObject {
                 if let count = result.windowCount { message += "; Finder windows: \(count)" }
                 if let scriptError = result.scriptError { message += "; AppleScript error: \(scriptError)" }
                 self.automationTestStatus = message
+                self.isFinderAccessAvailable = result.permissionStatus == noErr
+                self.isFinderPermissionChecked = true
+                self.finderPermissionMessage = result.permissionStatus == noErr
+                    ? "Finder access is enabled."
+                    : "Finder access is off. Enable FolderBeacon under Automation in System Settings."
                 self.log(message)
                 if result.permissionStatus == noErr { self.refreshFinderFolders() }
             }
