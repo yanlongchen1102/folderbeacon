@@ -66,9 +66,9 @@ final class QuickPanelController: NSObject, NSWindowDelegate {
     private func present(activating: Bool = true) {
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
-        state?.setQuickPanelSearchFocus(activating)
         if activating { panel.makeKeyAndOrderFront(nil) }
         else { panel.orderFrontRegardless() }
+        state?.setQuickPanelSearchFocus(activating)
         if !isVisible { state?.capturePanelEvent(.panelOpened) }
         isVisible = true
         // A panel attached to an Open/Save sheet is persistent for the sheet's
@@ -117,8 +117,8 @@ final class QuickPanelController: NSObject, NSWindowDelegate {
     }
 
     func focus() {
-        state?.setQuickPanelSearchFocus(true)
         panel.makeKeyAndOrderFront(nil)
+        state?.setQuickPanelSearchFocus(true)
     }
 
     private func cocoaFrame(fromAccessibilityFrame frame: CGRect) -> CGRect {

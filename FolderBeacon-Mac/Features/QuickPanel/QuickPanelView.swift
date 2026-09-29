@@ -9,6 +9,7 @@ struct QuickPanelView: View {
     @AppStorage("PathPilot.showRecentFolders") private var showRecentFolders = true
     @State private var query = ""
     @State private var selectedResultID: String?
+    @State private var displayedSessionGeneration = 0
     @FocusState private var searchFocused: Bool
     @StateObject private var searchModel: QuickPanelSearchModel
 
@@ -103,6 +104,7 @@ struct QuickPanelView: View {
                     }
                 }
             }
+            .id(state.quickPanelSessionGeneration)
         }
         .onChange(of: selectedResultID) { _, id in
             guard let id else { return }
@@ -119,15 +121,20 @@ struct QuickPanelView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .preferredColorScheme(.dark)
         .onAppear {
-            selectedResultID = results.first?.id
+            if displayedSessionGeneration != state.quickPanelSessionGeneration { resetForNewSession() }
+            else { selectedResultID = results.first?.id }
             searchFocused = state.quickPanelShouldFocusSearch
         }
         .onChange(of: state.quickPanelSearchFocusGeneration) { _, _ in
             searchFocused = state.quickPanelShouldFocusSearch
         }
+        .onChange(of: state.quickPanelSessionGeneration) { _, _ in
+            resetForNewSession()
+        }
         .onChange(of: query) { _, value in
-            state.recordSearchUsage(isEmpty: value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            selectedResultID = nil
+            let isEmpty = value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            state.recordSearchUsage(isEmpty: isEmpty)
+            selectedResultID = isEmpty ? defaultResults.first?.id : nil
             searchModel.search(value, context: searchContext)
         }
         .onDisappear { searchModel.cancel() }
@@ -144,6 +151,13 @@ struct QuickPanelView: View {
     }
 
     private var resultIDs: [String] { results.map(\.id) }
+
+    private func resetForNewSession() {
+        displayedSessionGeneration = state.quickPanelSessionGeneration
+        searchModel.reset()
+        query = ""
+        selectedResultID = defaultResults.first?.id
+    }
 
     @ViewBuilder private var contextBrowser: some View {
         if defaultResults.isEmpty {

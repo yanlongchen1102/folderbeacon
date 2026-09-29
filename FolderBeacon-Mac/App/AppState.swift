@@ -18,6 +18,7 @@ final class AppState: ObservableObject {
     @Published private(set) var globalShortcut = GlobalShortcut.load()
     @Published private(set) var globalShortcutStatus = ""
     @Published private(set) var quickPanelSearchFocusGeneration = 0
+    @Published private(set) var quickPanelSessionGeneration = 0
     private(set) var quickPanelShouldFocusSearch = false
 
     let targetTracker = TargetAppTracker()
@@ -133,6 +134,7 @@ final class AppState: ObservableObject {
         // A detected file panel owns its target context; otherwise Finder is the destination.
         if !isFileDialogActive { targetContext = nil }
         isShowingAutomatically = false
+        quickPanelSessionGeneration &+= 1
         if let activeFilePanelFrame { quickPanel.show(attachedTo: activeFilePanelFrame) }
         else { quickPanel.show() }
     }
@@ -177,6 +179,9 @@ final class AppState: ObservableObject {
                 guard !Task.isCancelled, self.activeFilePanelSession?.id == session.id else { return }
                 recentStore.record(folder)
                 log("Navigation completed")
+                // Navigation temporarily gives the Save/Open panel keyboard focus.
+                // Once the folder change has completed, return it to our search field.
+                quickPanel.focus()
             } catch is CancellationError {
                 log("Navigation cancelled")
             } catch {
@@ -338,10 +343,11 @@ final class AppState: ObservableObject {
             self.isFileDialogActive = true
             self.fileDialogTitle = context.title
             self.activeFilePanelFrame = context.frame
+            self.quickPanelSessionGeneration &+= 1
             if !self.isShowingAutomatically { self.refreshFinderFolders() }
             self.isShowingAutomatically = true
             if !self.quickPanel.isVisible {
-                self.quickPanel.show(attachedTo: context.frame, activating: false)
+                self.quickPanel.show(attachedTo: context.frame, activating: true)
             }
             self.log("Automatically attached FolderBeacon to \(context.targetApplication.localizedName ?? "Unknown") file panel")
         }

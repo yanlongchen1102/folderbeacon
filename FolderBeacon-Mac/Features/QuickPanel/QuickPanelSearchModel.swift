@@ -29,4 +29,10 @@ final class QuickPanelSearchModel: ObservableObject {
     }
 
     func cancel() { searchTask?.cancel(); searchTask = nil; isSearching = false }
+
+    func reset() {
+        cancel()
+        queryGeneration &+= 1
+        response = FolderSearchResponse(results: [], hasMore: false, configuredRootCount: response.configuredRootCount, isIndexing: false, hasIncompleteRoots: false)
+    }
 }
