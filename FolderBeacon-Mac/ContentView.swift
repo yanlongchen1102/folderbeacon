@@ -176,8 +176,8 @@ private struct PermissionGuidanceView: View {
                 title: "Navigate File Dialogs",
                 detail: "Allow FolderBeacon to detect Open and Save dialogs and jump to a selected folder. macOS calls this Device Control and Data Access on newer versions.",
                 status: state.isAccessibilityTrusted ? "Enabled" : "Needs Setup",
-                statusColor: state.isAccessibilityTrusted ? .green : .orange,
-                required: true
+                statusColor: state.isAccessibilityTrusted ? .green : .red,
+                enabled: state.isAccessibilityTrusted
             ) {
                 Button(L10n.string("Open System Settings")) {
                     state.openAccessibilitySettings()
@@ -185,10 +185,10 @@ private struct PermissionGuidanceView: View {
             }
             permissionCard(
                 title: "Finder Access",
-                detail: "Show folders from open Finder windows. File dialog navigation works without this permission.",
+                detail: "Show folders from your open Finder windows.",
                 status: !state.isFinderPermissionChecked ? "Checking" : (state.isFinderAccessAvailable ? "Enabled" : "Not Enabled"),
-                statusColor: state.isFinderAccessAvailable ? .green : .secondary,
-                required: false
+                statusColor: !state.isFinderPermissionChecked ? .secondary : (state.isFinderAccessAvailable ? .green : .red),
+                enabled: !state.isFinderPermissionChecked || state.isFinderAccessAvailable
             ) {
                 HStack {
                     Button(L10n.string("Allow Finder Access")) { state.testFinderAutomationPermission() }
@@ -203,15 +203,7 @@ private struct PermissionGuidanceView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            permissionCard(
-                title: "Search Your Folders",
-                detail: "Choose search folders when you want local folder search. macOS may ask for access to protected folders you include.",
-                status: "Optional",
-                statusColor: .secondary,
-                required: false
-            ) {
-                Button(L10n.string("Choose Search Folders")) { state.openSettings(.searchScopes) }
-            }
+#if DEBUG
             VStack(alignment: .leading, spacing: 5) {
                 Text(L10n.string("Running App Copy")).font(.subheadline.weight(.semibold))
                 if Bundle.main.bundleURL.path.contains("/DerivedData/") {
@@ -242,6 +234,7 @@ private struct PermissionGuidanceView: View {
                 }
             }
             .padding(.top, 4)
+#endif
         }
         .task {
             while !Task.isCancelled {
@@ -252,15 +245,12 @@ private struct PermissionGuidanceView: View {
         }
     }
 
-    private func permissionCard<Actions: View>(title: String, detail: String, status: String, statusColor: Color, required: Bool, @ViewBuilder actions: () -> Actions) -> some View {
+    private func permissionCard<Actions: View>(title: String, detail: String, status: String, statusColor: Color, enabled: Bool, @ViewBuilder actions: () -> Actions) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(L10n.string(title)).font(.headline)
-                Text(L10n.string(required ? "Required" : "Optional"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Spacer()
-                Label(L10n.string(status), systemImage: status == "Enabled" ? "checkmark.circle.fill" : "circle")
+                Label(L10n.string(status), systemImage: status == "Enabled" ? "checkmark.circle.fill" : (enabled ? "circle" : "exclamationmark.triangle.fill"))
                     .foregroundStyle(statusColor)
             }
             Text(L10n.string(detail)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -269,7 +259,7 @@ private struct PermissionGuidanceView: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(required && status == "Needs Setup" ? Color.orange.opacity(0.45) : Color.clear))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(enabled ? Color.clear : Color.red.opacity(0.45)))
     }
 }
 
