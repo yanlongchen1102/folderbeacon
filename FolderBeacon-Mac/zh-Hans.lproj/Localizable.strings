@@ -113,3 +113,7 @@
 "Failed" = "失败";
 "Updating" = "正在更新";
 "Waiting" = "等待中";
+"Privacy" = "隐私";
+"Send anonymous usage data" = "发送匿名使用数据";
+"Share allowlisted feature usage only. Folder names, paths, search text, and unknown app identifiers are never sent." = "仅分享白名单中的功能使用情况。绝不会发送文件夹名称、路径、搜索内容或未知应用标识。";
+"Optional and off by default. Folder names, paths, search text, and unknown app identifiers are never sent." = "此功能可选且默认关闭。绝不会发送文件夹名称、路径、搜索内容或未知应用标识。";

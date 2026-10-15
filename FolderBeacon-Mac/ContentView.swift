@@ -47,6 +47,7 @@ struct ContentView: View {
 
 private struct GettingStartedView: View {
     @ObservedObject var state: AppState
+    @AppStorage(UsageAnalytics.consentKey) private var analyticsEnabled = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -84,6 +85,13 @@ private struct GettingStartedView: View {
             .padding(14)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
             PermissionGuidanceView(state: state)
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(L10n.string("Send anonymous usage data"), isOn: $analyticsEnabled)
+                Text(L10n.string("Optional and off by default. Folder names, paths, search text, and unknown app identifiers are never sent."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
 
             }
             .padding(.horizontal, 32)
@@ -114,9 +122,34 @@ private struct FeatureRow: View {
 private struct GeneralView: View {
     @AppStorage("PathPilot.showFinderWindows") private var showFinderWindows = true
     @AppStorage("PathPilot.showRecentFolders") private var showRecentFolders = true
+    @AppStorage(UsageAnalytics.consentKey) private var analyticsEnabled = false
     var state: AppState
     @ObservedObject private var language = AppLanguage.shared
-    var body: some View { Form { Section(L10n.string("Language")) { Picker(L10n.string("App Language"), selection: $language.choice) { ForEach(AppLanguage.Choice.allCases) { choice in Text(choice.title).tag(choice) } }; Text(L10n.string("Choose the language used by FolderBeacon.")).font(.caption).foregroundStyle(.secondary) }; Section(L10n.string("Behavior")) { Toggle(L10n.string("Show Finder Windows"), isOn: $showFinderWindows); Toggle(L10n.string("Show Recent Folders"), isOn: $showRecentFolders) }; Section(L10n.string("Support")) { LabeledContent(L10n.string("Accessibility"), value: L10n.string(state.isAccessibilityTrusted ? "Enabled" : "Needs Setup")); Button(L10n.string("Open Permissions")) { state.openSettings(.permissions) } } }.formStyle(.grouped) }
+
+    var body: some View {
+        Form {
+            Section(L10n.string("Language")) {
+                Picker(L10n.string("App Language"), selection: $language.choice) {
+                    ForEach(AppLanguage.Choice.allCases) { choice in Text(choice.title).tag(choice) }
+                }
+                Text(L10n.string("Choose the language used by FolderBeacon.")).font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L10n.string("Behavior")) {
+                Toggle(L10n.string("Show Finder Windows"), isOn: $showFinderWindows)
+                Toggle(L10n.string("Show Recent Folders"), isOn: $showRecentFolders)
+            }
+            Section(L10n.string("Privacy")) {
+                Toggle(L10n.string("Send anonymous usage data"), isOn: $analyticsEnabled)
+                Text(L10n.string("Share allowlisted feature usage only. Folder names, paths, search text, and unknown app identifiers are never sent."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L10n.string("Support")) {
+                LabeledContent(L10n.string("Accessibility"), value: L10n.string(state.isAccessibilityTrusted ? "Enabled" : "Needs Setup"))
+                Button(L10n.string("Open Permissions")) { state.openSettings(.permissions) }
+            }
+        }
+        .formStyle(.grouped)
+    }
 }
 
 private struct ShortcutView: View {

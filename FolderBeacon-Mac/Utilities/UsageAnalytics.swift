@@ -18,10 +18,13 @@ enum UsageAnalytics {
         case copyPath = "mac_copy_path_clicked"
     }
 
-    // Public project ingestion key, not a personal/admin API key.
-    private static let projectKey = "phc_tSzQveQy6AmVWbzopXZ7y6zuttDc5sxxgrnW9M4yNNqW"
+    static let consentKey = "FolderBeacon.analytics.enabled.v1"
+
+    // The public ingestion key is supplied at build time. Open-source builds leave it empty.
+    private static var projectKey: String {
+        Bundle.main.object(forInfoDictionaryKey: "FolderBeaconPostHogKey") as? String ?? ""
+    }
     private static let endpoint = URL(string: "https://us.i.posthog.com/i/v0/e/")!
-    private static let distinctID = anonymousID(defaults: .standard)
 
     /// A random installation ID survives app launches and updates without fingerprinting.
     static func anonymousID(defaults: UserDefaults) -> String {
@@ -54,13 +57,16 @@ enum UsageAnalytics {
         case "com.apple.finder": return "finder"
         case "com.apple.dt.Xcode": return "xcode"
         case "com.microsoft.VSCode": return "vscode"
-        default: return bundleIdentifier.lowercased()
+        default: return "other"
         }
     }
 
     static func capture(_ event: Event, useApp: String? = nil) {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: consentKey), !projectKey.isEmpty else { return }
+
         var properties: [String: Any] = [
-            "distinct_id": distinctID,
+            "distinct_id": anonymousID(defaults: defaults),
             "$process_person_profile": false,
             "$geoip_disable": true,
             "$ip": "0.0.0.0"

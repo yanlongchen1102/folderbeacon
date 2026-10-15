@@ -113,3 +113,7 @@
 "Failed" = "Failed";
 "Updating" = "Updating";
 "Waiting" = "Waiting";
+"Privacy" = "Privacy";
+"Send anonymous usage data" = "Send anonymous usage data";
+"Share allowlisted feature usage only. Folder names, paths, search text, and unknown app identifiers are never sent." = "Share allowlisted feature usage only. Folder names, paths, search text, and unknown app identifiers are never sent.";
+"Optional and off by default. Folder names, paths, search text, and unknown app identifiers are never sent." = "Optional and off by default. Folder names, paths, search text, and unknown app identifiers are never sent.";

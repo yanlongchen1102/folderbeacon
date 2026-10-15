@@ -1,2 +1,18 @@
+# Build products
 /dist/
+DerivedData/
+build/
 
+# Xcode user-specific data
+xcuserdata/
+*.xcuserstate
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.p12
+*.mobileprovision
+
+# macOS
+.DS_Store

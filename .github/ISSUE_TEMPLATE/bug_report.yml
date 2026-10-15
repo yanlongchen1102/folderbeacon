@@ -1,0 +1,25 @@
+name: Bug report
+description: Report reproducible incorrect behavior
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Include clear reproduction steps.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: FolderBeacon version
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: macOS version
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Additional context
+      description: Do not include private file paths or other sensitive data.

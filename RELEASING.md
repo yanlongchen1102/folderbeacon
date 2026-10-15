@@ -29,8 +29,10 @@
 2. 在项目根目录运行：
 
    ```zsh
-   ./scripts/release.sh
+   FOLDERBEACON_POSTHOG_KEY='phc_...' ./scripts/release.sh
    ```
+
+   `FOLDERBEACON_POSTHOG_KEY` 只能使用 PostHog 公共项目采集 key，不能使用个人 API key；不设置时构建不会上报分析事件。不要将 key 写入仓库。
 
    脚本依次执行 Release 归档、Developer ID 导出、签名检查、生成含 `FolderBeacon.app` 与 `Applications` 快捷方式的 DMG、DMG 签名、公证、附加票据、生成 Sparkle 签名的 `appcast.xml` 和校验。
 

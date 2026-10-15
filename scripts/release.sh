@@ -108,6 +108,7 @@ if [[ -z "$APP_INPUT" ]]; then
         -clonedSourcePackagesDirPath "$DIST_DIR/SourcePackages" \
         -archivePath "$WORK_DIR/FolderBeacon-Mac.xcarchive" \
         "FOLDERBEACON_APPCAST_URL=$FEED_URL" \
+        "FOLDERBEACON_POSTHOG_KEY=${FOLDERBEACON_POSTHOG_KEY:-}" \
         archive
 
     printf 'Exporting Developer ID app...\n'
