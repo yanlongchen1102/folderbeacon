@@ -2,13 +2,18 @@ import ApplicationServices
 import Foundation
 
 enum AXWindowInspector {
+    struct Evidence {
+        let role: String
+        let labels: [String]
+    }
+
     struct Snapshot {
         let role: String
         let subrole: String
         let title: String
         let isModal: Bool
         let frame: CGRect
-        let evidence: [String]
+        let evidence: [Evidence]
     }
 
     static func snapshot(of element: AXUIElement) -> Snapshot? {
@@ -18,41 +23,78 @@ enum AXWindowInspector {
         let subrole = string(kAXSubroleAttribute, from: element) ?? ""
         let title = string(kAXTitleAttribute, from: element) ?? ""
         let isModal = bool(kAXModalAttribute, from: element) ?? false
-        let evidence = evidenceInHierarchy(element, depth: 3)
+        let evidence = evidenceInHierarchy(element, depth: 6, limit: 300)
         return Snapshot(role: role, subrole: subrole, title: title, isModal: isModal, frame: frame, evidence: evidence)
     }
 
-    static func looksLikeFilePanel(_ snapshot: Snapshot) -> String? {
-        let fileRoles: Set<String> = [kAXBrowserRole, kAXOutlineRole, kAXTableRole, kAXScrollAreaRole]
-        let hasFileView = snapshot.evidence.contains { fileRoles.contains($0) }
-        let labels = snapshot.evidence.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-        let hasPrimaryAction = labels.contains { label in
-            ["open", "save", "choose", "打开", "保存", "选取", "选择"].contains(label)
-        }
-        // A real NSOpenPanel/NSSavePanel always exposes a primary action and
-        // Cancel. Requiring both prevents generic lists such as Spotlight from
-        // being classified as a file panel merely because they offer "Open".
-        let hasCancelAction = labels.contains { ["cancel", "取消"].contains($0) }
-        let lower = labels.joined(separator: " ")
-        let hasCompactSaveControls = ["save as", "where", "format", "存储为", "位置", "格式"].contains { lower.contains($0) }
+    private static let fileViewRoles: Set<String> = [kAXBrowserRole, kAXOutlineRole, kAXTableRole]
+    private static let primaryActions: Set<String> = ["open", "save", "choose", "打开", "保存", "选取", "选择"]
+    private static let cancelActions: Set<String> = ["cancel", "取消"]
 
-        if hasFileView && hasPrimaryAction && hasCancelAction {
-            return "role=\(snapshot.role), modal=\(snapshot.isModal), file browser + action controls"
+    private static func labels(in snapshot: Snapshot, role: String? = nil) -> [String] {
+        snapshot.evidence.filter { role == nil || $0.role == role }.flatMap(\.labels).map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         }
-        // Chrome and other apps can present a collapsed NSSavePanel. It has no
-        // file browser until expanded, but Cmd-Shift-G still navigates it.
-        if (snapshot.isModal || snapshot.role == kAXSheetRole) && hasPrimaryAction && hasCancelAction && hasCompactSaveControls {
+    }
+
+    private static func hasActionButtons(_ snapshot: Snapshot) -> Bool {
+        let buttons = labels(in: snapshot, role: kAXButtonRole)
+        return buttons.contains(where: primaryActions.contains) && buttons.contains(where: cancelActions.contains)
+    }
+
+    private static func hasFileView(_ snapshot: Snapshot) -> Bool {
+        // A chat history or a web page's scroll area is not a file browser.
+        snapshot.evidence.contains { fileViewRoles.contains($0.role) }
+    }
+
+    private static func hasCompactSaveControls(_ snapshot: Snapshot) -> Bool {
+        let labels = labels(in: snapshot).joined(separator: " ")
+        return ["save as", "where", "format", "存储为", "位置", "格式"].contains { labels.contains($0) }
+    }
+
+    static func looksLikeFilePanel(_ snapshot: Snapshot) -> String? {
+        // Text content and file names must never count as action buttons.
+        guard hasActionButtons(snapshot) else { return nil }
+        if hasFileView(snapshot) {
+            return "role=\(snapshot.role), modal=\(snapshot.isModal), native file view + action buttons"
+        }
+        if (snapshot.isModal || snapshot.role == kAXSheetRole) && hasCompactSaveControls(snapshot) {
             return "role=\(snapshot.role), modal=\(snapshot.isModal), compact native save controls"
         }
         return nil
     }
 
-    static func windows(for pid: pid_t) -> [AXUIElement] {
+    static func windows(for pid: pid_t, diagnostic: ((String) -> Void)? = nil) -> [AXUIElement] {
         let app = AXUIElementCreateApplication(pid)
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
-              let windows = value as? [AXUIElement] else { return [] }
-        return windows
+        let status = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+        guard status == .success, let windows = value as? [AXUIElement] else {
+            diagnostic?("pid=\(pid): AXWindows failed (\(status.rawValue))")
+            return []
+        }
+        // AXWindows can retain a dismissed Open/Save panel with its old controls.
+        // Only WindowServer's on-screen windows prove that it is still shown.
+        guard let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
+        let visibleFrames = windowInfo.compactMap { info -> CGRect? in
+            guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+                  (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1 > 0,
+                  let bounds = info[kCGWindowBounds as String] as? NSDictionary else { return nil }
+            return CGRect(dictionaryRepresentation: bounds)
+        }
+        let visible = windows.filter { window in
+            guard bool(kAXMinimizedAttribute, from: window) != true,
+                  let frame = frame(of: window) else { return false }
+            return hasMatchingVisibleFrame(frame, in: visibleFrames)
+        }
+        diagnostic?("pid=\(pid): AXWindows=\(windows.count), onScreenFrames=\(visibleFrames), accepted=\(visible.count)")
+        return visible
+    }
+
+    static func hasMatchingVisibleFrame(_ frame: CGRect, in visibleFrames: [CGRect]) -> Bool {
+        visibleFrames.contains {
+            abs($0.minX - frame.minX) <= 2 && abs($0.minY - frame.minY) <= 2
+                && abs($0.width - frame.width) <= 2 && abs($0.height - frame.height) <= 2
+        }
     }
 
     static func isWindowValid(_ window: AXUIElement, for pid: pid_t) -> Bool {
@@ -65,6 +107,21 @@ enum AXWindowInspector {
 
     static func focusedElement(for pid: pid_t) -> AXUIElement? {
         element(kAXFocusedUIElementAttribute, from: AXUIElementCreateApplication(pid))
+    }
+
+    struct PanelFocusEvidence {
+        let windowIsInside: Bool
+        let elementIsInside: Bool?
+
+        // A retained panel can still appear in AXWindows and WindowServer.
+        // A focused control outside it overrides a stale focused-window value.
+        var supportsAttachment: Bool { elementIsInside ?? windowIsInside }
+    }
+
+    static func panelFocus(of panel: AXUIElement, for pid: pid_t) -> PanelFocusEvidence {
+        let windowMatches = focusedWindow(for: pid).map { isDescendant($0, of: panel) } ?? false
+        let elementMatches = focusedElement(for: pid).map { isDescendant($0, of: panel) }
+        return PanelFocusEvidence(windowIsInside: windowMatches, elementIsInside: elementMatches)
     }
 
     static func isSameElement(_ lhs: AXUIElement?, _ rhs: AXUIElement?) -> Bool {
@@ -95,20 +152,12 @@ enum AXWindowInspector {
 
     static func isCompactSavePanel(_ window: AXUIElement) -> Bool {
         guard let snapshot = snapshot(of: window) else { return false }
-        let fileRoles: Set<String> = [kAXBrowserRole, kAXOutlineRole, kAXTableRole, kAXScrollAreaRole]
-        let hasFileBrowser = snapshot.evidence.contains { fileRoles.contains($0) }
-        let labels = snapshot.evidence.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-        let hasPrimaryAction = labels.contains { ["open", "save", "choose", "打开", "保存", "选取", "选择"].contains($0) }
-        let hasCancelAction = labels.contains { ["cancel", "取消"].contains($0) }
-        let lower = labels.joined(separator: " ")
-        let hasSaveControls = ["save as", "where", "format", "存储为", "位置", "格式"].contains { lower.contains($0) }
-        return !hasFileBrowser && hasPrimaryAction && hasCancelAction && hasSaveControls
+        return !hasFileView(snapshot) && looksLikeFilePanel(snapshot) != nil
     }
 
     static func hasExpandedFileBrowser(_ window: AXUIElement) -> Bool {
         guard let snapshot = snapshot(of: window) else { return false }
-        let fileRoles: Set<String> = [kAXBrowserRole, kAXOutlineRole, kAXTableRole, kAXScrollAreaRole]
-        return snapshot.evidence.contains { fileRoles.contains($0) }
+        return hasFileView(snapshot)
     }
 
     @discardableResult
@@ -145,17 +194,25 @@ enum AXWindowInspector {
         return AXUIElementGetPid(app, &pid) == .success ? pid : nil
     }
 
-    private static func evidenceInHierarchy(_ element: AXUIElement, depth: Int) -> [String] {
-        guard depth >= 0 else { return [] }
-        var values: [String] = []
-        if let role = string(kAXRoleAttribute, from: element) { values.append(role) }
-        if let title = string(kAXTitleAttribute, from: element), !title.isEmpty { values.append(title) }
-        if let value = string(kAXValueAttribute, from: element), !value.isEmpty { values.append(value) }
-        if let description = string(kAXDescriptionAttribute, from: element), !description.isEmpty { values.append(description) }
+    private static func evidenceInHierarchy(_ element: AXUIElement, depth: Int, limit: Int) -> [Evidence] {
+        guard depth >= 0, limit > 0 else { return [] }
+        let role = string(kAXRoleAttribute, from: element) ?? ""
+        // Web content can contain arbitrary Open/Save/Cancel controls and tables.
+        // Native file panels live outside the application's web area.
+        guard role != "AXWebArea" else { return [] }
+        let labels = [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute].compactMap {
+            string($0, from: element)
+        }.filter { !$0.isEmpty }
+        var values = [Evidence(role: role, labels: labels)]
+        // File entries cannot contribute dialog controls. Avoid scanning large
+        // folder lists (and mistaking file names for Save/Cancel labels).
+        guard !fileViewRoles.contains(role) else { return values }
         var childValue: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childValue) == .success,
            let children = childValue as? [AXUIElement] {
-            for child in children.prefix(80) { values += evidenceInHierarchy(child, depth: depth - 1) }
+            for child in children.prefix(80) where values.count < limit {
+                values += evidenceInHierarchy(child, depth: depth - 1, limit: limit - values.count)
+            }
         }
         return values
     }

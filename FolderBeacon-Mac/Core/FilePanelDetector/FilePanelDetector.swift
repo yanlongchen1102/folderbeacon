@@ -21,6 +21,8 @@ final class FilePanelDetector {
     private var burstTasks: [Task<Void, Never>] = []
     private var dismissalWatchdog: Task<Void, Never>?
     private var activePanelWatchdog: Task<Void, Never>?
+    private var discoveryWatchdog: Task<Void, Never>?
+    private var lastInspection: [pid_t: String] = [:]
     private var consecutiveMissingScans = 0
     private var dismissalsSuppressedUntil = Date.distantPast
     private(set) var isRunning = false
@@ -40,12 +42,24 @@ final class FilePanelDetector {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.appObservers.removeValue(forKey: app.processIdentifier)?.stop()
+                self.lastInspection.removeValue(forKey: app.processIdentifier)
                 if self.activeContext?.sourcePID == app.processIdentifier || self.activeContext?.targetPID == app.processIdentifier {
                     self.dismissActiveContext(reason: "The file-panel process terminated")
                 }
             }
         }
         isRunning = true
+        // AX notifications can arrive before the panel has finished loading, or
+        // be unsupported by the host. Keep discovering while the host is active.
+        discoveryWatchdog = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self else { return }
+                guard self.activeContext == nil,
+                      self.currentApplication?.isActive == true else { continue }
+                self.scan()
+            }
+        }
         if let app = NSWorkspace.shared.frontmostApplication { observe(application: app) }
         onDiagnostic?("Automatic file-panel detection started")
     }
@@ -57,6 +71,9 @@ final class FilePanelDetector {
         dismissalWatchdog = nil
         activePanelWatchdog?.cancel()
         activePanelWatchdog = nil
+        discoveryWatchdog?.cancel()
+        discoveryWatchdog = nil
+        lastInspection.removeAll()
         appObservers.values.forEach { $0.stop() }
         appObservers.removeAll()
         if let workspaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(workspaceObserver) }
@@ -133,11 +150,15 @@ final class FilePanelDetector {
     }
 
     private func scan() {
-        guard let targetApplication = currentApplication else { return }
+        guard isRunning, let targetApplication = currentApplication else { return }
+        // Delayed events from background apps must not attach their old panels.
+        if activeContext == nil && !targetApplication.isActive { return }
         if let activeContext,
            AXWindowInspector.isWindowValid(activeContext.window, for: activeContext.sourcePID),
            let snapshot = AXWindowInspector.snapshot(of: activeContext.window),
-           AXWindowInspector.looksLikeFilePanel(snapshot) != nil {
+           AXWindowInspector.looksLikeFilePanel(snapshot) != nil,
+           AXWindowInspector.focusedApplicationPID() == ProcessInfo.processInfo.processIdentifier
+            || AXWindowInspector.panelFocus(of: activeContext.window, for: activeContext.sourcePID).supportsAttachment {
             consecutiveMissingScans = 0
             return
         }
@@ -183,11 +204,21 @@ final class FilePanelDetector {
         guard application.processIdentifier != ProcessInfo.processInfo.processIdentifier,
               !excludedSystemUIBundleIDs.contains(application.bundleIdentifier ?? "") else { return [] }
         installObserver(for: application)
-        return AXWindowInspector.windows(for: application.processIdentifier).compactMap { window in
-            guard let snapshot = AXWindowInspector.snapshot(of: window),
-                  let reason = AXWindowInspector.looksLikeFilePanel(snapshot) else { return nil }
+        var inspection: [String] = []
+        let candidates: [Candidate] = AXWindowInspector.windows(for: application.processIdentifier, diagnostic: { inspection.append($0) }).compactMap { window in
+            guard let snapshot = AXWindowInspector.snapshot(of: window) else { return nil }
+            let result = AXWindowInspector.looksLikeFilePanel(snapshot)
+            let focus = AXWindowInspector.panelFocus(of: window, for: application.processIdentifier)
+            inspection.append("frame=\(snapshot.frame), classifier=\(result ?? "rejected"), focusWindowInside=\(focus.windowIsInside), focusElementInside=\(focus.elementIsInside.map(String.init) ?? "unavailable"), accepted=\(result != nil && focus.supportsAttachment)")
+            guard let reason = result, focus.supportsAttachment else { return nil }
             return (application, window, snapshot, reason)
         }
+        let summary = inspection.joined(separator: "; ")
+        if lastInspection[application.processIdentifier] != summary {
+            lastInspection[application.processIdentifier] = summary
+            onDiagnostic?("Inspection \(application.localizedName ?? "Unknown"): \(summary)")
+        }
+        return candidates
     }
 
     private func accept(_ candidate: Candidate, target: NSRunningApplication) {

@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-/// Counts only allowlisted actions. Never accepts user content or externally supplied identifiers.
+/// Counts only allowlisted actions. Feedback content is sent only after an explicit submission.
 @MainActor
 enum UsageAnalytics {
     enum Event: String {
@@ -16,6 +16,7 @@ enum UsageAnalytics {
         case folderSelected = "mac_folder_selected"
         case openInFinder = "mac_open_in_finder_clicked"
         case copyPath = "mac_copy_path_clicked"
+        case feedbackOpened = "mac_feedback_opened"
     }
 
     // Public project ingestion key, not a personal/admin API key.
@@ -43,6 +44,17 @@ enum UsageAnalytics {
         return URLSession(configuration: configuration)
     }()
 
+    /// Properties shared by every event. Do not set `$ip` or `$geoip_disable` here:
+    /// PostHog uses the request IP to enrich newly received events with country/region.
+    private static var standardProperties: [String: Any] {
+        [
+            "distinct_id": distinctID,
+            "$process_person_profile": false,
+            "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            "macos_version": ProcessInfo.processInfo.operatingSystemVersionString
+        ]
+    }
+
     /// Use bundle identifiers rather than user-editable app/window names.
     static func appLabel(bundleIdentifier: String?) -> String {
         guard let bundleIdentifier, !bundleIdentifier.isEmpty else { return "unknown" }
@@ -59,12 +71,7 @@ enum UsageAnalytics {
     }
 
     static func capture(_ event: Event, useApp: String? = nil) {
-        var properties: [String: Any] = [
-            "distinct_id": distinctID,
-            "$process_person_profile": false,
-            "$geoip_disable": true,
-            "$ip": "0.0.0.0"
-        ]
+        var properties = standardProperties
         if let useApp { properties["use_app"] = useApp }
 #if DEBUG
         properties["debug"] = true
@@ -96,6 +103,49 @@ enum UsageAnalytics {
                 logger.info("PostHog accepted: \(eventName, privacy: .public), HTTP \(status)")
             } else {
                 logger.error("PostHog rejected: \(eventName, privacy: .public), HTTP \(status)")
+            }
+        }.resume()
+    }
+
+    /// Sends feedback only after an explicit user submission. Content is intentionally
+    /// not logged locally and is capped to keep a single event reasonably sized.
+    static func captureFeedback(kind: String, incompatibleApp: String?, message: String) {
+        let trimmedMessage = String(message.trimmingCharacters(in: .whitespacesAndNewlines).prefix(4_000))
+        guard !trimmedMessage.isEmpty else { return }
+
+        var properties = standardProperties
+        properties.merge([
+            "feedback_type": kind,
+            "feedback_message": trimmedMessage
+        ], uniquingKeysWith: { _, new in new })
+        if let incompatibleApp {
+            let trimmedApp = String(incompatibleApp.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
+            if !trimmedApp.isEmpty { properties["incompatible_app"] = trimmedApp }
+        }
+#if DEBUG
+        properties["debug"] = true
+#endif
+        let payload: [String: Any] = [
+            "api_key": projectKey,
+            "event": "mac_feedback_submitted",
+            "properties": properties
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let logger = logger
+        session.dataTask(with: request) { _, response, error in
+            // User-provided feedback must never appear in device logs.
+            if let error {
+                logger.error("PostHog feedback transport failed, code=\((error as NSError).code)")
+                return
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if !(200..<300).contains(status) {
+                logger.error("PostHog feedback rejected, HTTP \(status)")
             }
         }.resume()
     }

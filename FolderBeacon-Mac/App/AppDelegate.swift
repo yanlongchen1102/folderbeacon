@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         statusItem.menu?.addItem(NSMenuItem.separator())
         statusItem.menu?.addItem(withTitle: L10n.string("Getting Started…"), action: #selector(openGettingStarted), keyEquivalent: "")
         statusItem.menu?.addItem(withTitle: L10n.string("Settings…"), action: #selector(openSettings), keyEquivalent: ",")
+        statusItem.menu?.addItem(withTitle: L10n.string("Contact Support…"), action: #selector(contactSupport), keyEquivalent: "")
         let permissionItem = statusItem.menu?.addItem(withTitle: L10n.string("Enable Automatic Popup…"), action: #selector(enableAutomaticPopup), keyEquivalent: "")
         permissionItem?.tag = 42
         permissionItem?.isHidden = AccessibilityPermissionManager.isTrusted
@@ -98,6 +99,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func openSettings() {
         UsageAnalytics.capture(.menuSettings)
         showAppWindow(page: .general)
+    }
+
+    @objc private func contactSupport() {
+        NSWorkspace.shared.open(SupportContact.mailURL)
     }
 
     @objc private func openGettingStarted() {

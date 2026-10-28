@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 
 enum SettingsPage: Hashable {
-    case gettingStarted, general, shortcut, favorites, searchScopes, permissions, about
-    var title: String { switch self { case .gettingStarted: L10n.string("Getting Started"); case .general: L10n.string("General"); case .shortcut: L10n.string("Shortcut"); case .favorites: L10n.string("Favorites"); case .searchScopes: L10n.string("Search Folders"); case .permissions: L10n.string("Permissions"); case .about: L10n.string("About") } }
-    var icon: String { switch self { case .gettingStarted: "sparkles"; case .general: "gearshape"; case .shortcut: "command"; case .favorites: "star"; case .searchScopes: "folder.badge.gearshape"; case .permissions: "checkmark.shield"; case .about: "info.circle" } }
+    case gettingStarted, general, shortcut, favorites, searchScopes, permissions, feedback, about
+    var title: String { switch self { case .gettingStarted: L10n.string("Getting Started"); case .general: L10n.string("General"); case .shortcut: L10n.string("Shortcut"); case .favorites: L10n.string("Favorites"); case .searchScopes: L10n.string("Search Folders"); case .permissions: L10n.string("Permissions"); case .feedback: L10n.string("Feedback"); case .about: L10n.string("About") } }
+    var icon: String { switch self { case .gettingStarted: "sparkles"; case .general: "gearshape"; case .shortcut: "command"; case .favorites: "star"; case .searchScopes: "folder.badge.gearshape"; case .permissions: "checkmark.shield"; case .feedback: "bubble.left.and.bubble.right"; case .about: "info.circle" } }
 }
 
 struct ContentView: View {
@@ -22,6 +22,7 @@ struct ContentView: View {
             List(selection: $selection) {
                 Section { pageLink(.gettingStarted) }
                 Section(L10n.string("Settings")) { pageLink(.general); pageLink(.shortcut); pageLink(.favorites); pageLink(.searchScopes); pageLink(.permissions) }
+                Section(L10n.string("Support")) { pageLink(.feedback) }
                 Section { pageLink(.about) }
             }
             .listStyle(.sidebar)
@@ -35,6 +36,7 @@ struct ContentView: View {
                 case .favorites: FavoritesView(state: state)
                 case .searchScopes: SearchScopeSettingsView(state: state)
                 case .permissions: PermissionsView(state: state)
+                case .feedback: FeedbackView()
                 case .about: AboutView()
                 }
             }
@@ -117,7 +119,34 @@ private struct GeneralView: View {
     @AppStorage("PathPilot.showRecentFolders") private var showRecentFolders = true
     var state: AppState
     @ObservedObject private var language = AppLanguage.shared
-    var body: some View { Form { Section(L10n.string("Language")) { Picker(L10n.string("App Language"), selection: $language.choice) { ForEach(AppLanguage.Choice.allCases) { choice in Text(choice.title).tag(choice) } }; Text(L10n.string("Choose the language used by FolderBeacon.")).font(.caption).foregroundStyle(.secondary) }; Section(L10n.string("Behavior")) { Toggle(L10n.string("Show Finder Windows"), isOn: $showFinderWindows); Toggle(L10n.string("Show Recent Folders"), isOn: $showRecentFolders) }; Section(L10n.string("Support")) { LabeledContent(L10n.string("File Dialog Access"), value: L10n.string(state.isAccessibilityTrusted ? "Enabled" : "Needs Setup")); Button(L10n.string("Open Permissions")) { state.openSettings(.permissions) } } }.formStyle(.grouped) }
+    var body: some View {
+        Form {
+            Section(L10n.string("Language")) {
+                Picker(L10n.string("App Language"), selection: $language.choice) {
+                    ForEach(AppLanguage.Choice.allCases) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
+                Text(L10n.string("Choose the language used by FolderBeacon."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section(L10n.string("Behavior")) {
+                Toggle(L10n.string("Show Finder Windows"), isOn: $showFinderWindows)
+                Toggle(L10n.string("Show Recent Folders"), isOn: $showRecentFolders)
+            }
+            Section(L10n.string("Support")) {
+                LabeledContent(L10n.string("File Dialog Access"), value: L10n.string(state.isAccessibilityTrusted ? "Enabled" : "Needs Setup"))
+                Button(L10n.string("Open Permissions")) { state.openSettings(.permissions) }
+                LabeledContent(L10n.string("Email")) {
+                    Link(SupportContact.email, destination: SupportContact.mailURL)
+                }
+                Button(L10n.string("Send Feedback")) { state.openSettings(.feedback) }
+                Text(L10n.string("Tell us about incompatible apps or share an idea."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
 }
 
 private struct ShortcutView: View {
@@ -284,6 +313,9 @@ private struct AboutView: View {
             Text("FolderBeacon").font(.title.bold())
             Text(L10n.string("A context-aware folder navigation tool for macOS."))
                 .foregroundStyle(.secondary)
+            Link(destination: SupportContact.mailURL) {
+                Label(SupportContact.email, systemImage: "envelope")
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity)

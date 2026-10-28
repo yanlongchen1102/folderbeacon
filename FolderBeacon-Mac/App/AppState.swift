@@ -143,7 +143,8 @@ final class AppState: ObservableObject {
     }
 
     func dismissQuickPanel() {
-        guard !isFileDialogActive else { return }
+        navigationTask?.cancel()
+        navigationTask = nil
         quickPanel.dismiss()
     }
 
@@ -329,6 +330,17 @@ final class AppState: ObservableObject {
         if diagnostics.count > 200 { diagnostics.removeFirst(diagnostics.count - 200) }
 #if DEBUG
         NSLog("%@", line)
+        if let path = ProcessInfo.processInfo.environment["FOLDERBEACON_DIAGNOSTICS_PATH"],
+           let data = (line + "\n").data(using: .utf8) {
+            if !FileManager.default.fileExists(atPath: path) {
+                FileManager.default.createFile(atPath: path, contents: nil)
+            }
+            if let handle = FileHandle(forWritingAtPath: path) {
+                defer { try? handle.close() }
+                handle.seekToEndOfFile()
+                handle.write(data)
+            }
+        }
 #endif
     }
 
