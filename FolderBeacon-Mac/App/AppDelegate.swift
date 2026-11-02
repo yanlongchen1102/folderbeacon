@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var statusItem: NSStatusItem!
     private var appWindowController: NSWindowController?
     private var languageObserver: NSObjectProtocol?
+    private var lastExcludedApp: AppException?
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: false,
         updaterDelegate: nil,
@@ -26,6 +27,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSApp.setActivationPolicy(.accessory)
         if hasUpdateFeed {
             updaterController.startUpdater()
+        }
+        state.showSettingsWindow = { [weak self] page in self?.showAppWindow(page: page) }
+        state.exclusionFeedback = { [weak self] app in
+            guard let self else { return }
+            self.lastExcludedApp = app
+            self.configureMenuBar()
         }
         configureMenuBar()
         languageObserver = NotificationCenter.default.addObserver(forName: .appLanguageDidChange, object: nil, queue: .main) { [weak self] _ in
@@ -63,6 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let panelItem = statusItem.menu?.addItem(withTitle: L10n.string("Start Search"), action: #selector(showFolderPanel), keyEquivalent: "")
         panelItem?.keyEquivalentModifierMask = [.option]
         panelItem?.keyEquivalent = " "
+        if let app = lastExcludedApp, state.autoShowPolicy.exceptions.contains(where: { $0.id == app.id }) {
+            let undo = statusItem.menu?.addItem(withTitle: L10n.format("Undo exclusion of %@", app.name), action: #selector(undoExclusion), keyEquivalent: "")
+            undo?.target = self
+        }
         statusItem.menu?.addItem(NSMenuItem.separator())
         statusItem.menu?.addItem(withTitle: L10n.string("Getting Started…"), action: #selector(openGettingStarted), keyEquivalent: "")
         statusItem.menu?.addItem(withTitle: L10n.string("Settings…"), action: #selector(openSettings), keyEquivalent: ",")
@@ -85,6 +96,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         UsageAnalytics.capture(.menuOpened)
         menu.item(withTag: 42)?.isHidden = AccessibilityPermissionManager.isTrusted
         DispatchQueue.main.async { [weak self] in self?.state.refreshAccessibilityState() }
+    }
+
+    @objc private func undoExclusion() {
+        guard let app = lastExcludedApp else { return }
+        state.autoShowPolicy.remove(app.id)
+        lastExcludedApp = nil
+        configureMenuBar()
     }
 
     @objc private func enableAutomaticPopup() {

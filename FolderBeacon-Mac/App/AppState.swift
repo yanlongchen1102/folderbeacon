@@ -23,6 +23,12 @@ final class AppState: ObservableObject {
     @Published private(set) var quickPanelSessionGeneration = 0
     private(set) var quickPanelShouldFocusSearch = false
 
+    let autoShowPolicy = AutoShowPolicy()
+    var showSettingsWindow: ((SettingsPage) -> Void)?
+    var exclusionFeedback: ((AppException) -> Void)?
+    private var autoShowSubscription: AnyCancellable?
+    private var presentation = PanelPresentationState()
+
     let targetTracker = TargetAppTracker()
     let recentStore = RecentFolderStore()
     let projectStore = ProjectFolderStore()
@@ -38,7 +44,6 @@ final class AppState: ObservableObject {
         }
     )
     private lazy var filePanelDetector = FilePanelDetector()
-    private var isShowingAutomatically = false
     private var activeFilePanelFrame: CGRect?
     private var activeFilePanelSession: FilePanelContext?
     private var navigationTask: Task<Void, Never>?
@@ -80,6 +85,9 @@ final class AppState: ObservableObject {
         refreshAccessibilityState()
         refreshFinderPermission()
         _ = hotkey.start(shortcut: globalShortcut)
+        autoShowSubscription = autoShowPolicy.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.applyAutoShowPolicy() }
+        }
         configureFilePanelDetector()
         filePanelDetector.start()
         folderIndex.diagnostic = { [weak self] in self?.log($0) }
@@ -119,8 +127,9 @@ final class AppState: ObservableObject {
     }
 
     func showQuickPanel() {
+        filePanelDetector.refreshForManualInvocation(protectOwnPanel: quickPanel.isKey)
         if quickPanel.isVisible {
-            if isFileDialogActive { quickPanel.focus() }
+            if isFileDialogActive { presentation.manualOpen(); quickPanel.focus() }
             else { quickPanel.hide() }
             return
         }
@@ -131,7 +140,7 @@ final class AppState: ObservableObject {
         refreshFinderFolders()
         // A detected file panel owns its target context; otherwise Finder is the destination.
         if !isFileDialogActive { targetContext = nil }
-        isShowingAutomatically = false
+        presentation.manualOpen()
         quickPanelSessionGeneration &+= 1
         if let activeFilePanelFrame { quickPanel.show(attachedTo: activeFilePanelFrame) }
         else { quickPanel.show() }
@@ -145,6 +154,7 @@ final class AppState: ObservableObject {
     func dismissQuickPanel() {
         navigationTask?.cancel()
         navigationTask = nil
+        presentation.dismiss()
         quickPanel.dismiss()
     }
 
@@ -156,6 +166,28 @@ final class AppState: ObservableObject {
     }
 
     func openSettings(_ page: SettingsPage) { requestedSettingsPage = page }
+    func openAutoShowSettings() { showSettingsWindow?(.autoShow) }
+    var currentException: AppException? {
+        guard let session = activeFilePanelSession,
+              let app = AppException(application: session.targetApplication),
+              !autoShowPolicy.exceptions.contains(where: { $0.id == app.id }) else { return nil }
+        return app
+    }
+    func excludeCurrentApplication() {
+        guard let app = currentException else { return }
+        navigationTask?.cancel()
+        navigationTask = nil
+        presentation.dismiss()
+        autoShowPolicy.add(app)
+        quickPanel.hide()
+        exclusionFeedback?(app)
+    }
+    private func applyAutoShowPolicy() {
+        guard presentation.policyChanged(allowed: autoShowPolicy.allows(activeFilePanelSession?.targetApplication.bundleIdentifier)) else { return }
+        navigationTask?.cancel()
+        navigationTask = nil
+        quickPanel.hide()
+    }
 
     func updateGlobalShortcut(_ shortcut: GlobalShortcut) {
         guard hotkey.update(shortcut: shortcut) else { return }
@@ -175,7 +207,7 @@ final class AppState: ObservableObject {
             guard let self else { return }
             do {
                 try await navigator.navigate(to: folder, session: session, timing: timing)
-                guard !Task.isCancelled, self.activeFilePanelSession?.id == session.id else { return }
+                guard !Task.isCancelled, self.activeFilePanelSession?.id == session.id, self.quickPanel.isVisible else { return }
                 recentStore.record(folder)
                 log("Navigation completed")
                 // Navigation temporarily gives the Save/Open panel keyboard focus.
@@ -197,7 +229,12 @@ final class AppState: ObservableObject {
             log("Navigation refused: folder moved or deleted: \(folder.path)")
             return
         }
-        if isFileDialogActive, targetContext != nil {
+        if isFileDialogActive {
+            filePanelDetector.refreshForManualInvocation(protectOwnPanel: quickPanel.isKey)
+            guard isFileDialogActive, targetContext != nil else {
+                log("Navigation refused: file-panel session is no longer valid")
+                return
+            }
             // Keep the persistent panel visible, but ensure the synthetic
             // Cmd-Shift-G and path text are delivered to the Save/Open sheet.
             let shieldDuration = max(1.5, Double(timing.activateDelay + timing.goToFolderDelay + timing.inputDelay) / 1_000 + 1.0)
@@ -206,7 +243,7 @@ final class AppState: ObservableObject {
             navigate(to: folder)
         } else {
             quickPanel.hide()
-            isShowingAutomatically = false
+            presentation.dismiss()
             NSWorkspace.shared.open(folder)
             recentStore.record(folder)
             log("Opened in Finder: \(folder.path)")
@@ -349,6 +386,11 @@ final class AppState: ObservableObject {
         filePanelDetector.onPanelDetected = { [weak self] context in
             guard let self else { return }
             self.navigationTask?.cancel()
+            let previous = self.activeFilePanelSession
+            // The detector may reacquire the same AX window after a transient focus change.
+            let sameWindow = previous.map { $0.sourcePID == context.sourcePID && CFEqual($0.window, context.window) } ?? false
+            let shouldShow = self.presentation.detected(sameWindow: sameWindow, allowed: self.autoShowPolicy.allows(context.targetApplication.bundleIdentifier))
+            if !sameWindow { self.quickPanelSessionGeneration &+= 1 }
             self.activeFilePanelSession = context
             self.targetContext = TargetApplicationContext(
                 pid: context.targetApplication.processIdentifier,
@@ -360,13 +402,12 @@ final class AppState: ObservableObject {
             self.isFileDialogActive = true
             self.fileDialogTitle = context.title
             self.activeFilePanelFrame = context.frame
-            self.quickPanelSessionGeneration &+= 1
-            if !self.isShowingAutomatically { self.refreshFinderFolders() }
-            self.isShowingAutomatically = true
+            guard shouldShow else { return }
             if !self.quickPanel.isVisible {
+                self.refreshFinderFolders()
                 self.quickPanel.show(attachedTo: context.frame, activating: true)
             }
-            self.log("Automatically attached FolderBeacon to \(context.targetApplication.localizedName ?? "Unknown") file panel")
+
         }
         filePanelDetector.onPanelDismissed = { [weak self] in
             guard let self else { return }
@@ -378,11 +419,11 @@ final class AppState: ObservableObject {
 
     private func clearFilePanelSession(hideAutomaticPanel: Bool) {
         activeFilePanelSession = nil
+        presentation.endSession()
         isFileDialogActive = false
         fileDialogTitle = ""
         targetContext = nil
         activeFilePanelFrame = nil
         if hideAutomaticPanel { quickPanel.hide() }
-        isShowingAutomatically = false
     }
 }

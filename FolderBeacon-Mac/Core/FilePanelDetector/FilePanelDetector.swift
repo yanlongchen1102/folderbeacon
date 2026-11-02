@@ -124,6 +124,30 @@ final class FilePanelDetector {
         scheduleDetectionBurst()
     }
 
+    /// Refresh synchronously for a user action. The watchdog deliberately waits
+    /// for several missing scans; a shortcut or navigation must not use that
+    /// grace period to target a closed or background dialog.
+    func refreshForManualInvocation(protectOwnPanel: Bool) {
+        guard isRunning else { return }
+        let focusedPID = AXWindowInspector.focusedApplicationPID()
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        if let context = activeContext {
+            let ownsFocus = protectOwnPanel && (focusedPID == ownPID || focusedPID == context.targetPID || focusedPID == context.sourcePID)
+            let hostHasFocus = focusedPID == context.targetPID || focusedPID == context.sourcePID
+            let valid = AXWindowInspector.isWindowValid(context.window, for: context.sourcePID)
+                && (AXWindowInspector.snapshot(of: context.window).flatMap { AXWindowInspector.looksLikeFilePanel($0) } != nil)
+                && (ownsFocus || (hostHasFocus && AXWindowInspector.panelFocus(of: context.window, for: context.sourcePID).supportsAttachment))
+            if valid { return }
+            dismissActiveContext(reason: "File-panel session failed manual verification")
+        }
+        if let focusedPID, focusedPID != ownPID,
+           let focused = NSRunningApplication(processIdentifier: focusedPID),
+           focused.bundleIdentifier != panelServiceBundleID {
+            observe(application: focused)
+        }
+        scan()
+    }
+
     func suppressDismissals(for seconds: TimeInterval) {
         dismissalsSuppressedUntil = max(dismissalsSuppressedUntil, Date.now.addingTimeInterval(seconds))
         dismissalWatchdog?.cancel()

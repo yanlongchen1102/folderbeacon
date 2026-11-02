@@ -9,6 +9,9 @@ struct QuickPanelView: View {
     @AppStorage("PathPilot.showRecentFolders") private var showRecentFolders = true
     @State private var query = ""
     @State private var selectedResultID: String?
+    @State private var keyboardScrollTarget: String?
+    // Keep rows under the pointer stable while navigation updates recent history.
+    @State private var sessionRecentFolders: [RecentFolder]
     @State private var displayedSessionGeneration = 0
     @FocusState private var searchFocused: Bool
     @StateObject private var searchModel: QuickPanelSearchModel
@@ -17,6 +20,7 @@ struct QuickPanelView: View {
         self.state = state
         self.projects = projects
         self.movePanel = movePanel
+        _sessionRecentFolders = State(initialValue: state.recentStore.entries)
         _searchModel = StateObject(wrappedValue: QuickPanelSearchModel(service: state.folderSearch))
     }
 
@@ -34,7 +38,7 @@ struct QuickPanelView: View {
         if let first = state.finderFolders.first { append(first.windowName, first.url, .current) }
         if showFinderWindows { state.finderFolders.forEach { append($0.windowName, $0.url, .finder) } }
         projects.folders.forEach { append($0.name, $0.url, .favorite) }
-        if showRecentFolders { state.recentStore.entries.prefix(5).forEach { append($0.displayName, URL(fileURLWithPath: $0.path), .recent) } }
+        if showRecentFolders { sessionRecentFolders.prefix(5).forEach { append($0.displayName, URL(fileURLWithPath: $0.path), .recent) } }
         return result
     }
 
@@ -80,6 +84,15 @@ struct QuickPanelView: View {
                     .onKeyPress(.upArrow) { moveSelection(.up); return .handled }
                     .onKeyPress(.downArrow) { moveSelection(.down); return .handled }
                     .onKeyPress(.escape) { state.dismissQuickPanel(); return .handled }
+                Menu {
+                    if let app = state.currentException {
+                        Button(L10n.format("Stop showing automatically in %@", app.name)) { state.excludeCurrentApplication() }
+                    }
+                    Button(L10n.string("Manage App Exceptions…")) { state.openAutoShowSettings() }
+                } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help(L10n.string("Auto Show Options"))
             }
             .padding(.horizontal, 13).padding(.vertical, 11)
             .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -106,9 +119,10 @@ struct QuickPanelView: View {
             }
             .id(state.quickPanelSessionGeneration)
         }
-        .onChange(of: selectedResultID) { _, id in
+        .onChange(of: keyboardScrollTarget) { _, id in
             guard let id else { return }
-            scrollProxy.scrollTo(id, anchor: .center)
+            // Only keyboard navigation should scroll; reveal with minimum movement.
+            scrollProxy.scrollTo(id)
         }
         .onChange(of: resultIDs) { _, ids in
             if let selectedResultID, ids.contains(selectedResultID) { return }
@@ -132,6 +146,7 @@ struct QuickPanelView: View {
             resetForNewSession()
         }
         .onChange(of: query) { _, value in
+            keyboardScrollTarget = nil
             let isEmpty = value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             state.recordSearchUsage(isEmpty: isEmpty)
             selectedResultID = isEmpty ? defaultResults.first?.id : nil
@@ -146,7 +161,7 @@ struct QuickPanelView: View {
         FolderSearchContext(
             finderFolders: state.finderFolders.map { ($0.windowName, $0.url) },
             favorites: projects.folders.map { ($0.name, $0.url) },
-            recent: state.recentStore.entries.map { ($0.displayName, URL(fileURLWithPath: $0.path), $0.lastUsedAt) }
+            recent: sessionRecentFolders.map { ($0.displayName, URL(fileURLWithPath: $0.path), $0.lastUsedAt) }
         )
     }
 
@@ -154,6 +169,8 @@ struct QuickPanelView: View {
 
     private func resetForNewSession() {
         displayedSessionGeneration = state.quickPanelSessionGeneration
+        keyboardScrollTarget = nil
+        sessionRecentFolders = state.recentStore.entries
         searchModel.reset()
         query = ""
         selectedResultID = defaultResults.first?.id
@@ -181,7 +198,7 @@ struct QuickPanelView: View {
 
     private func resultRows(_ rows: [FolderResult]) -> some View {
         ForEach(rows) { row in
-            Button { selectedResultID = row.id; open(row) } label: {
+            Button { keyboardScrollTarget = nil; selectedResultID = row.id; open(row) } label: {
                 HStack(spacing: 10) {
                     Image(systemName: row.kind == .favorite ? "star.fill" : "folder.fill").foregroundStyle(row.kind == .favorite ? .yellow : .accentColor).frame(width: 18)
                     VStack(alignment: .leading, spacing: 2) {
@@ -204,8 +221,9 @@ struct QuickPanelView: View {
         switch direction {
         case .up: selectedResultID = visibleResults[max(0, (currentIndex ?? 0) - 1)].id
         case .down: selectedResultID = visibleResults[min(visibleResults.count - 1, (currentIndex ?? -1) + 1)].id
-        default: break
+        default: return
         }
+        keyboardScrollTarget = selectedResultID
     }
     private func openSelection() { guard let selectedResultID, let row = results.first(where: { $0.id == selectedResultID }) else { return }; open(row) }
     private func open(_ row: FolderResult) { state.navigateFromQuickPanel(to: row.url) }

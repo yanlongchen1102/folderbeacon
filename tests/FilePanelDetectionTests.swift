@@ -43,6 +43,13 @@ struct FilePanelDetectionTests {
         check("Open alone is insufficient", !detected([browser, open]))
         check("ordinary settings form is not a collapsed Save panel", !detected([filename, save, cancel]))
         check("generic confirmation modal is rejected", !detected([save, cancel], modal: true))
+        let outline = Evidence(role: kAXOutlineRole, labels: [])
+        let importButton = Evidence(role: kAXButtonRole, labels: ["导入", "OKButton"])
+        let cancelButton = Evidence(role: kAXButtonRole, labels: ["取消", "CancelButton"])
+        check("Jianying import sheet is supported", detected([outline, importButton, cancelButton], role: kAXSheetRole))
+        check("localized panel recognized by AppKit button identifiers", detected([outline, .init(role: kAXButtonRole, labels: ["Hinzufügen", "OKButton"]), .init(role: kAXButtonRole, labels: ["Abbrechen", "CancelButton"])]))
+        check("Import alone without file view is rejected", !detected([.init(role: kAXButtonRole, labels: ["导入"]), .init(role: kAXButtonRole, labels: ["取消"])]))
+        check("Import without cancel is rejected", !detected([outline, .init(role: kAXButtonRole, labels: ["导入"])]))
 
         let mainWindow = CGRect(x: 0, y: 30, width: 1920, height: 1050)
         check("visible native panel matches WindowServer", AXWindowInspector.hasMatchingVisibleFrame(frame, in: [mainWindow, frame]))

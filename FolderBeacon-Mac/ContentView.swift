@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 
 enum SettingsPage: Hashable {
-    case gettingStarted, general, shortcut, favorites, searchScopes, permissions, feedback, about
-    var title: String { switch self { case .gettingStarted: L10n.string("Getting Started"); case .general: L10n.string("General"); case .shortcut: L10n.string("Shortcut"); case .favorites: L10n.string("Favorites"); case .searchScopes: L10n.string("Search Folders"); case .permissions: L10n.string("Permissions"); case .feedback: L10n.string("Feedback"); case .about: L10n.string("About") } }
-    var icon: String { switch self { case .gettingStarted: "sparkles"; case .general: "gearshape"; case .shortcut: "command"; case .favorites: "star"; case .searchScopes: "folder.badge.gearshape"; case .permissions: "checkmark.shield"; case .feedback: "bubble.left.and.bubble.right"; case .about: "info.circle" } }
+    case gettingStarted, general, autoShow, shortcut, favorites, searchScopes, permissions, feedback, about
+    var title: String { switch self { case .gettingStarted: L10n.string("Getting Started"); case .general: L10n.string("General"); case .autoShow: L10n.string("Auto Show"); case .shortcut: L10n.string("Shortcut"); case .favorites: L10n.string("Favorites"); case .searchScopes: L10n.string("Search Folders"); case .permissions: L10n.string("Permissions"); case .feedback: L10n.string("Feedback"); case .about: L10n.string("About") } }
+    var icon: String { switch self { case .gettingStarted: "sparkles"; case .general: "gearshape"; case .autoShow: "rectangle.on.rectangle"; case .shortcut: "command"; case .favorites: "star"; case .searchScopes: "folder.badge.gearshape"; case .permissions: "checkmark.shield"; case .feedback: "bubble.left.and.bubble.right"; case .about: "info.circle" } }
 }
 
 struct ContentView: View {
@@ -21,7 +21,7 @@ struct ContentView: View {
         HSplitView {
             List(selection: $selection) {
                 Section { pageLink(.gettingStarted) }
-                Section(L10n.string("Settings")) { pageLink(.general); pageLink(.shortcut); pageLink(.favorites); pageLink(.searchScopes); pageLink(.permissions) }
+                Section(L10n.string("Settings")) { pageLink(.general); pageLink(.autoShow); pageLink(.shortcut); pageLink(.favorites); pageLink(.searchScopes); pageLink(.permissions) }
                 Section(L10n.string("Support")) { pageLink(.feedback) }
                 Section { pageLink(.about) }
             }
@@ -32,6 +32,7 @@ struct ContentView: View {
                 switch selection {
                 case .gettingStarted: GettingStartedView(state: state)
                 case .general: GeneralView(state: state)
+                case .autoShow: AutoShowSettingsView(policy: state.autoShowPolicy)
                 case .shortcut: ShortcutView(state: state)
                 case .favorites: FavoritesView(state: state)
                 case .searchScopes: SearchScopeSettingsView(state: state)

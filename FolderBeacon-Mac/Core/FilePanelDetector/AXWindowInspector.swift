@@ -28,8 +28,8 @@ enum AXWindowInspector {
     }
 
     private static let fileViewRoles: Set<String> = [kAXBrowserRole, kAXOutlineRole, kAXTableRole]
-    private static let primaryActions: Set<String> = ["open", "save", "choose", "打开", "保存", "选取", "选择"]
-    private static let cancelActions: Set<String> = ["cancel", "取消"]
+    private static let primaryActions: Set<String> = ["open", "save", "choose", "import", "打开", "保存", "选取", "选择", "导入", "okbutton"]
+    private static let cancelActions: Set<String> = ["cancel", "取消", "cancelbutton"]
 
     private static func labels(in snapshot: Snapshot, role: String? = nil) -> [String] {
         snapshot.evidence.filter { role == nil || $0.role == role }.flatMap(\.labels).map {
@@ -86,8 +86,23 @@ enum AXWindowInspector {
                   let frame = frame(of: window) else { return false }
             return hasMatchingVisibleFrame(frame, in: visibleFrames)
         }
-        diagnostic?("pid=\(pid): AXWindows=\(windows.count), onScreenFrames=\(visibleFrames), accepted=\(visible.count)")
-        return visible
+        var accepted = visible
+        var sheets = 0
+        for window in visible {
+            var childValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXChildrenAttribute as CFString, &childValue) == .success,
+                  let children = childValue as? [AXUIElement] else { continue }
+            for child in children {
+                guard string(kAXRoleAttribute, from: child) == kAXSheetRole,
+                      let frame = frame(of: child),
+                      hasMatchingVisibleFrame(frame, in: visibleFrames),
+                      !accepted.contains(where: { CFEqual($0, child) }) else { continue }
+                accepted.append(child)
+                sheets += 1
+            }
+        }
+        diagnostic?("pid=\(pid): AXWindows=\(windows.count), onScreenFrames=\(visibleFrames), accepted=\(visible.count), sheets=\(sheets)")
+        return accepted
     }
 
     static func hasMatchingVisibleFrame(_ frame: CGRect, in visibleFrames: [CGRect]) -> Bool {
@@ -200,7 +215,7 @@ enum AXWindowInspector {
         // Web content can contain arbitrary Open/Save/Cancel controls and tables.
         // Native file panels live outside the application's web area.
         guard role != "AXWebArea" else { return [] }
-        let labels = [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute].compactMap {
+        let labels = [kAXTitleAttribute, kAXValueAttribute, kAXDescriptionAttribute, kAXIdentifierAttribute].compactMap {
             string($0, from: element)
         }.filter { !$0.isEmpty }
         var values = [Evidence(role: role, labels: labels)]
@@ -210,7 +225,8 @@ enum AXWindowInspector {
         var childValue: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childValue) == .success,
            let children = childValue as? [AXUIElement] {
-            for child in children.prefix(80) where values.count < limit {
+            for child in children.prefix(80) where values.count < limit
+                && string(kAXRoleAttribute, from: child) != kAXSheetRole {
                 values += evidenceInHierarchy(child, depth: depth - 1, limit: limit - values.count)
             }
         }

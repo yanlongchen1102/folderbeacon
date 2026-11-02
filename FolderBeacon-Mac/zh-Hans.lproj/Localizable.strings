@@ -150,3 +150,23 @@
 "Move FolderBeacon to Applications before granting access." = "请先将 FolderBeacon 移到“应用程序”，再进行授权。";
 "Allow FolderBeacon to detect Open and Save dialogs and jump to a selected folder. macOS calls this Device Control and Data Access on newer versions." = "允许 FolderBeacon 检测打开和保存对话框，并跳转到选定文件夹。在较新版本的 macOS 中，此权限称为“设备控制和数据访问”。";
 "Choose where FolderBeacon looks for folders. Search happens locally and does not depend on Spotlight. Protected folders may trigger a macOS access request when indexing begins." = "选择 FolderBeacon 搜索文件夹的位置。搜索在本机完成，不依赖 Spotlight。开始索引受保护的文件夹时，macOS 可能请求访问权限。";
+
+"Show automatically in Open and Save dialogs" = "在打开和存储对话框中自动显示";
+"FolderBeacon appears automatically in compatible dialogs, except for the apps below." = "FolderBeacon 会在兼容的对话框中自动显示，以下应用除外。";
+"Automatic display is off. Your exceptions are saved, and the shortcut still works." = "自动显示已关闭。应用例外会保留，快捷键仍可使用。";
+"App Exceptions" = "应用例外";
+"No App Exceptions" = "暂无应用例外";
+"Add apps where FolderBeacon should not appear automatically." = "添加不需要自动显示 FolderBeacon 的应用。";
+"Removing an exception takes effect for the next dialog." = "移除例外后，将从下一个对话框开始生效。";
+"Add Apps…" = "添加应用…";
+"Add App Exceptions" = "添加应用例外";
+"Choose running apps or browse for an app." = "选择正在运行的应用，或浏览选择应用。";
+"Search apps" = "搜索应用";
+"Browse Apps…" = "浏览应用…";
+"Add Selected" = "添加所选应用";
+"Stop showing automatically in %@" = "不再在“%@”中自动显示";
+"Manage App Exceptions…" = "管理应用例外…";
+"Auto Show Options" = "自动显示选项";
+"Undo exclusion of %@" = "撤销 %@ 的例外";
+"Remove" = "移除";
+"Cancel" = "取消";

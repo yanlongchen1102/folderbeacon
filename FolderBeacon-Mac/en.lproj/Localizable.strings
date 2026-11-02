@@ -150,3 +150,21 @@
 "Move FolderBeacon to Applications before granting access." = "Move FolderBeacon to Applications before granting access.";
 "Allow FolderBeacon to detect Open and Save dialogs and jump to a selected folder. macOS calls this Device Control and Data Access on newer versions." = "Allow FolderBeacon to detect Open and Save dialogs and jump to a selected folder. macOS calls this Device Control and Data Access on newer versions.";
 "Choose where FolderBeacon looks for folders. Search happens locally and does not depend on Spotlight. Protected folders may trigger a macOS access request when indexing begins." = "Choose where FolderBeacon looks for folders. Search happens locally and does not depend on Spotlight. Protected folders may trigger a macOS access request when indexing begins.";
+
+"Show automatically in Open and Save dialogs" = "Show automatically in Open and Save dialogs";
+"FolderBeacon appears automatically in compatible dialogs, except for the apps below." = "FolderBeacon appears automatically in compatible dialogs, except for the apps below.";
+"Automatic display is off. Your exceptions are saved, and the shortcut still works." = "Automatic display is off. Your exceptions are saved, and the shortcut still works.";
+"App Exceptions" = "App Exceptions";
+"No App Exceptions" = "No App Exceptions";
+"Add apps where FolderBeacon should not appear automatically." = "Add apps where FolderBeacon should not appear automatically.";
+"Removing an exception takes effect for the next dialog." = "Removing an exception takes effect for the next dialog.";
+"Add Apps…" = "Add Apps…";
+"Add App Exceptions" = "Add App Exceptions";
+"Choose running apps or browse for an app." = "Choose running apps or browse for an app.";
+"Search apps" = "Search apps";
+"Browse Apps…" = "Browse Apps…";
+"Add Selected" = "Add Selected";
+"Stop showing automatically in %@" = "Stop showing automatically in %@";
+"Manage App Exceptions…" = "Manage App Exceptions…";
+"Auto Show Options" = "Auto Show Options";
+"Undo exclusion of %@" = "Undo exclusion of %@";

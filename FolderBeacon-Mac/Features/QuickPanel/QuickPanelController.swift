@@ -14,6 +14,7 @@ final class QuickPanelController: NSObject, NSWindowDelegate {
     private var escapeMonitor: Any?
     private var dragOrigin: NSPoint?
     private(set) var isVisible = false
+    var isKey: Bool { isVisible && panel.isKeyWindow }
 
     init(state: AppState) {
         self.state = state
